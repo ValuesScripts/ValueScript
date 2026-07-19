@@ -189,23 +189,15 @@ WindUI:Popup({
 
 })
 
-
-
 repeat task.wait() until popupClosed
-
-
-
-
-
-
 
 local Window = WindUI:CreateWindow({
 
     Title = CreateGradientText("Value Hub | Murder Mystery 2", Colors.Red, Colors.Green),
 
-    Author = "by Nyex ",
+    Author = "by Value ",
 
-    Folder = "Nyex Hb",
+    Folder = "Value Hb",
 
     Icon = "skull",
 
@@ -227,7 +219,7 @@ local Window = WindUI:CreateWindow({
 
     OpenButton = {
 
-        Title = "Open Nyex Hub",
+        Title = "Open Value Hub",
 
         CornerRadius = UDim.new(0.5, 0),
 
