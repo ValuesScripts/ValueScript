@@ -246,30 +246,51 @@ local Creator = (function()
 	-- cached. Requires a script executor (loadstring + HttpGet); falls
 	-- back to no icon rather than erroring when that's unavailable (plain
 	-- Studio, no internet, etc.) so a missing icon never breaks the UI.
+	--
+	-- Fetched ASYNCHRONOUSLY (task.spawn), never inline: Window/Tab
+	-- construction must never block on a network round-trip just because
+	-- someone passed an Icon prop. Everything reads/writes through a
+	-- single in-flight request + a waiter queue, so the first icon on
+	-- screen triggers exactly one HTTP call no matter how many "lucide:"
+	-- icons are requested before it resolves.
 	local LUCIDE_DATA_URL = "https://raw.githubusercontent.com/VirtualButFake/lucide-roblox/master/src/icons.luau"
 	local lucideData: { any }? = nil
-	local lucideLoadAttempted = false
+	local lucideLoading = false
+	local lucideWaiters: { (({ any }?) -> ()) } = {}
 
-	local function loadLucideData(): { any }?
-		if lucideLoadAttempted then
-			return lucideData
+	local function ensureLucideData(onReady: ({ any }?) -> ())
+		if lucideData then
+			onReady(lucideData)
+			return
 		end
-		lucideLoadAttempted = true
-		local ok, result = pcall(function()
-			return loadstring(game:HttpGet(LUCIDE_DATA_URL))()
+		table.insert(lucideWaiters, onReady)
+		if lucideLoading then
+			return
+		end
+		lucideLoading = true
+		task.spawn(function()
+			local ok, result = pcall(function()
+				return loadstring(game:HttpGet(LUCIDE_DATA_URL))()
+			end)
+			if ok then
+				lucideData = result
+			else
+				warn("[UILibrary] Lucide icons unavailable (needs a script executor with loadstring/HttpGet): " .. tostring(result))
+			end
+			local waiters = lucideWaiters
+			lucideWaiters = {}
+			for _, waiter in ipairs(waiters) do
+				local waiterOk, waiterErr = pcall(waiter, lucideData)
+				if not waiterOk then
+					warn("[UILibrary] Lucide icon callback error: " .. tostring(waiterErr))
+				end
+			end
 		end)
-		if ok then
-			lucideData = result
-		else
-			warn("[UILibrary] Lucide icons unavailable (needs a script executor with loadstring/HttpGet): " .. tostring(result))
-		end
-		return lucideData
 	end
 
 	-- Mirrors lucide-roblox's own GetAsset(name, size) algorithm against
-	-- the fetched icon set: {Id, Url, ImageRectSize, ImageRectOffset}.
-	function Creator.GetLucideAsset(name: string, size: number?): { [string]: any }?
-		local data = loadLucideData()
+	-- an already-fetched icon data set: {Id, Url, ImageRectSize, ImageRectOffset}.
+	local function lookupLucideAsset(data: { any }?, name: string, size: number?): { [string]: any }?
 		if not data then
 			return nil
 		end
@@ -306,24 +327,37 @@ local Creator = (function()
 		}
 	end
 
+	-- Async equivalent of the old synchronous GetAsset -- resolves via
+	-- callback instead of blocking the caller.
+	function Creator.GetLucideAssetAsync(name: string, size: number?, callback: ({ [string]: any }?) -> ())
+		ensureLucideData(function(data)
+			callback(lookupLucideAsset(data, name, size))
+		end)
+	end
+
 	-- Applies an Icon prop to an ImageLabel. Accepts everything
-	-- ResolveIcon does (asset id/rbxassetid/rbxasset/http url), plus
-	-- "lucide:icon-name" for the full Lucide set via GetLucideAsset.
+	-- ResolveIcon does (asset id/rbxassetid/rbxasset/http url) --
+	-- resolved and applied immediately -- plus "lucide:icon-name" for the
+	-- full Lucide set, which resolves asynchronously (the ImageLabel is
+	-- left blank until then, never a stale/mismatched sprite region).
 	function Creator.ApplyIcon(imageLabel: ImageLabel, icon: (string | number)?, size: number?)
 		if typeof(icon) == "string" and (icon :: string):match("^lucide:") then
 			local name = (icon :: string):sub(8)
-			local asset = Creator.GetLucideAsset(name, size)
-			if asset then
-				imageLabel.Image = asset.Url
-				imageLabel.ImageRectOffset = asset.ImageRectOffset
-				imageLabel.ImageRectSize = asset.ImageRectSize
-				return
-			end
-			-- fetch failed or name not found -- leave blank rather than
-			-- showing a broken/mismatched sprite region
 			imageLabel.Image = ""
 			imageLabel.ImageRectOffset = Vector2.zero
 			imageLabel.ImageRectSize = Vector2.zero
+			Creator.GetLucideAssetAsync(name, size, function(asset)
+				if not imageLabel.Parent then
+					return -- destroyed before the fetch resolved
+				end
+				if asset then
+					imageLabel.Image = asset.Url
+					imageLabel.ImageRectOffset = asset.ImageRectOffset
+					imageLabel.ImageRectSize = asset.ImageRectSize
+					imageLabel.ImageTransparency = 1
+					Creator.Snap(imageLabel, { ImageTransparency = 0 }, 0.15)
+				end
+			end)
 			return
 		end
 
@@ -631,9 +665,20 @@ local Themes = (function()
 	local Registry: { [Instance]: RegistryEntry } = {}
 	local Cleanup: { [Instance]: RBXScriptConnection } = {}
 
+	-- Special-cased map values that resolve to a computed ColorSequence
+	-- instead of a plain palette lookup, for UIGradient.Color -- gives
+	-- accent-filled surfaces (toggle on-state, slider/progress fill,
+	-- primary buttons) a subtle two-tone depth using colors the palette
+	-- already defines, no extra theme keys needed.
+	local GRADIENTS: { [string]: (Palette) -> ColorSequence } = {
+		AccentGradient = function(palette)
+			return ColorSequence.new(palette.Accent, palette.AccentDark)
+		end,
+	}
+
 	local function applyMap(instance: Instance, map: RegistryEntry, palette: Palette)
 		for prop, key in pairs(map) do
-			local value = (palette :: any)[key]
+			local value: any = GRADIENTS[key] and GRADIENTS[key](palette) or (palette :: any)[key]
 			if value ~= nil then
 				local ok = pcall(function()
 					(instance :: any)[prop] = value
@@ -1140,6 +1185,15 @@ local Toggle = (function()
 		}, { Creator.Corner(999) })
 		self.Switch = switch
 
+		-- subtle accent->accentDark gradient on the "on" state; hidden
+		-- (Enabled = false) so the flat Border color shows through when off
+		local switchGradient = Creator.New("UIGradient", {
+			Rotation = 90,
+			Enabled = self.Value,
+			Parent = switch,
+		})
+		Theme.Register(switchGradient, { Color = "AccentGradient" })
+
 		local knob = Creator.New("Frame", {
 			Name = "Knob",
 			AnchorPoint = Vector2.new(0, 0.5),
@@ -1154,6 +1208,7 @@ local Toggle = (function()
 		local function render(animated: boolean)
 			local color = self.Value and Theme.Get("Accent") or Theme.Get("Border")
 			local pos = self.Value and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+			switchGradient.Enabled = self.Value
 			if animated then
 				Creator.Snap(switch, { BackgroundColor3 = color }, 0.15)
 				Creator.Animate(knob, { Position = pos }, 0.18, Enum.EasingStyle.Back)
@@ -1490,8 +1545,9 @@ local ProgressBar = (function()
 			BackgroundColor3 = Theme.Get("Accent"),
 			ZIndex = 4,
 			Parent = track,
-		}, { Creator.Corner(3) })
+		}, { Creator.Corner(3), Creator.New("UIGradient", { Rotation = 90 }) })
 		Theme.Register(fill, { BackgroundColor3 = "Accent" })
+		Theme.Register(fill:FindFirstChildOfClass("UIGradient"), { Color = "AccentGradient" })
 		self.Fill = fill
 
 		return self
@@ -1620,8 +1676,9 @@ local Slider = (function()
 			BackgroundColor3 = Theme.Get("Accent"),
 			ZIndex = 4,
 			Parent = track,
-		}, { Creator.Corner(4) })
+		}, { Creator.Corner(4), Creator.New("UIGradient", { Rotation = 90 }) })
 		Theme.Register(fill, { BackgroundColor3 = "Accent" })
+		Theme.Register(fill:FindFirstChildOfClass("UIGradient"), { Color = "AccentGradient" })
 		self.Fill = fill
 
 		local knob = Creator.New("Frame", {
@@ -3057,6 +3114,76 @@ local Section = (function()
 		return register(self, ProgressBar.new(self.Content, props, self._context))
 	end
 
+	-- Space: an invisible spacer, for grouping elements without a Divider
+	-- line between them.
+	function Section:CreateSpace(props)
+		props = props or {}
+		local space = Creator.New("Frame", {
+			Name = "Space",
+			Size = UDim2.new(1, 0, 0, props.Height or 8),
+			BackgroundTransparency = 1,
+			LayoutOrder = props.LayoutOrder or 0,
+			Parent = self.Content,
+		})
+		return register(self, {
+			Root = space,
+			SetVisible = function(_self, visible)
+				space.Visible = visible
+			end,
+			Destroy = function(_self)
+				space:Destroy()
+			end,
+		})
+	end
+
+	-- Tag: a small colored badge/pill, e.g. for flagging a section or
+	-- feature as "NEW" or "BETA".
+	function Section:CreateTag(props)
+		props = props or {}
+		local Theme = self._context.Theme
+		local color = props.Color or Theme.Get("Accent")
+
+		local tag = Creator.New("Frame", {
+			Name = "Tag",
+			Size = UDim2.new(0, 0, 0, 20),
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundColor3 = color,
+			BackgroundTransparency = 0.85,
+			LayoutOrder = props.LayoutOrder or 0,
+			Visible = props.Visible ~= false,
+			Parent = self.Content,
+		}, {
+			Creator.Corner(999),
+			Creator.Padding(0, 0, 10, 0, 10),
+			Creator.Stroke({ Color = color, Thickness = 1, Transparency = 0.5 }),
+		})
+
+		local label = Creator.New("TextLabel", {
+			Name = "Label",
+			Size = UDim2.new(0, 0, 1, 0),
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = props.Text or "TAG",
+			TextSize = 11,
+			TextColor3 = color,
+			Parent = tag,
+		})
+
+		return register(self, {
+			Root = tag,
+			SetText = function(_self, text)
+				label.Text = text
+			end,
+			SetVisible = function(_self, visible)
+				tag.Visible = visible
+			end,
+			Destroy = function(_self)
+				tag:Destroy()
+			end,
+		})
+	end
+
 	function Section:SetVisible(visible: boolean)
 		self.Root.Visible = visible
 	end
@@ -4273,6 +4400,185 @@ local Window = (function()
 		return self.Notifications:Push(props)
 	end
 
+	-- Confirmation / alert modal: dims the whole window, pops a centered
+	-- card in with Title/Content and a row of buttons.
+	--   Window:CreateDialog({
+	--       Title = "Reset settings?",
+	--       Content = "This can't be undone.",
+	--       Dismissable = true, -- click outside to close (default true)
+	--       Buttons = {
+	--           { Title = "Cancel" },
+	--           { Title = "Reset", Accent = true, Callback = function() ... end },
+	--       },
+	--   })
+	function Window:CreateDialog(props: { [string]: any })
+		props = props or {}
+
+		local dim = Creator.New("Frame", {
+			Name = "DialogDim",
+			Size = UDim2.new(1, 0, 1, 0),
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 1,
+			ZIndex = 2000,
+			Parent = self.MainFrame,
+		})
+
+		local cardHolder = Creator.New("Frame", {
+			Name = "DialogHolder",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, -10),
+			Size = UDim2.new(0, 320, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			ClipsDescendants = false,
+			ZIndex = 2001,
+			Parent = dim,
+		})
+		if not self.LowGraphicsMode then
+			Creator.Shadow(cardHolder, 10, 0.5)
+		end
+
+		local card = Creator.New("Frame", {
+			Name = "Card",
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundColor3 = Themes.Get("Elevated"),
+			BackgroundTransparency = 1,
+			ZIndex = 2002,
+			Parent = cardHolder,
+		}, {
+			Creator.Corner(10),
+			Creator.Stroke({ Color = Themes.Get("Border"), Thickness = 1 }),
+			Creator.Padding(16),
+		})
+		Themes.Register(card, { BackgroundColor3 = "Elevated" })
+		local cardStroke = card:FindFirstChildOfClass("UIStroke")
+		if cardStroke then
+			Themes.Register(cardStroke, { Color = "Border" })
+		end
+		Creator.ListLayout(Enum.FillDirection.Vertical, 12).Parent = card
+
+		local title = Creator.New("TextLabel", {
+			Name = "Title",
+			Size = UDim2.new(1, 0, 0, 20),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Text = props.Title or "Confirm",
+			TextSize = 16,
+			TextColor3 = Themes.Get("Text"),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextWrapped = true,
+			LayoutOrder = 1,
+			ZIndex = 2003,
+			Parent = card,
+		})
+		Themes.Register(title, { TextColor3 = "Text" })
+
+		if props.Content and props.Content ~= "" then
+			local content = Creator.New("TextLabel", {
+				Name = "Content",
+				Size = UDim2.new(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Gotham,
+				Text = props.Content,
+				TextSize = 13,
+				TextWrapped = true,
+				TextColor3 = Themes.Get("SubText"),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				LayoutOrder = 2,
+				ZIndex = 2003,
+				Parent = card,
+			})
+			Themes.Register(content, { TextColor3 = "SubText" })
+		end
+
+		local buttonsRow = Creator.New("Frame", {
+			Name = "Buttons",
+			Size = UDim2.new(1, 0, 0, 34),
+			BackgroundTransparency = 1,
+			LayoutOrder = 3,
+			ZIndex = 2003,
+			Parent = card,
+		})
+		Creator.ListLayout(Enum.FillDirection.Horizontal, 8, Enum.HorizontalAlignment.Right).Parent = buttonsRow
+
+		local closed = false
+		local function close()
+			if closed then
+				return
+			end
+			closed = true
+			Creator.Animate(dim, { BackgroundTransparency = 1 }, 0.18)
+			Creator.Animate(cardHolder, { Position = UDim2.new(0.5, 0, 0.5, -10) }, 0.18)
+			Creator.Animate(card, { BackgroundTransparency = 1 }, 0.15)
+			task.delay(0.2, function()
+				dim:Destroy()
+			end)
+		end
+
+		local buttons = props.Buttons or { { Title = "OK", Accent = true } }
+		for i, buttonProps in ipairs(buttons) do
+			local accent = buttonProps.Accent == true
+			local btn = Creator.New("TextButton", {
+				Name = buttonProps.Title or "Button",
+				Size = UDim2.fromOffset(0, 34),
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundColor3 = accent and Themes.Get("Accent") or Themes.Get("Tertiary"),
+				AutoButtonColor = false,
+				Font = Enum.Font.GothamBold,
+				Text = "  " .. (buttonProps.Title or "OK") .. "  ",
+				TextSize = 13,
+				TextColor3 = accent and Color3.new(1, 1, 1) or Themes.Get("Text"),
+				LayoutOrder = i,
+				ZIndex = 2003,
+				Parent = buttonsRow,
+			}, { Creator.Corner(6) })
+			if accent then
+				Themes.Register(btn, { BackgroundColor3 = "Accent" })
+				local gradient = Creator.New("UIGradient", { Rotation = 90, Parent = btn })
+				Themes.Register(gradient, { Color = "AccentGradient" })
+			else
+				Themes.Register(btn, { BackgroundColor3 = "Tertiary", TextColor3 = "Text" })
+			end
+
+			btn.MouseEnter:Connect(function()
+				Creator.Snap(btn, { BackgroundTransparency = 0.15 })
+			end)
+			btn.MouseLeave:Connect(function()
+				Creator.Snap(btn, { BackgroundTransparency = 0 })
+			end)
+			btn.MouseButton1Click:Connect(function()
+				close()
+				if buttonProps.Callback then
+					local ok, err = pcall(buttonProps.Callback)
+					if not ok then
+						warn("[UILibrary] Dialog button callback error: " .. tostring(err))
+					end
+				end
+			end)
+		end
+
+		if props.Dismissable ~= false then
+			local clickCatcher = Creator.New("TextButton", {
+				Name = "ClickCatcher",
+				Size = UDim2.new(1, 0, 1, 0),
+				BackgroundTransparency = 1,
+				Text = "",
+				ZIndex = 2000,
+				Parent = dim,
+			})
+			clickCatcher.MouseButton1Click:Connect(close)
+		end
+
+		-- entrance
+		Creator.Animate(dim, { BackgroundTransparency = 0.45 }, 0.18)
+		Creator.Animate(cardHolder, { Position = UDim2.new(0.5, 0, 0.5, 0) }, 0.22, Enum.EasingStyle.Back)
+		Creator.Animate(card, { BackgroundTransparency = 0 }, 0.18)
+
+		return { Close = close }
+	end
+
 	function Window:Destroy()
 		if self.Destroyed then
 			return
@@ -4293,14 +4599,20 @@ end)()
 --[[
 	UILibrary -- a modern, performance-first Roblox UI toolkit.
 
-	This whole file is self-contained and self-running: paste it into a
-	single LocalScript (or loadstring it from one raw link) and the hub
-	built at the bottom appears immediately. No other files needed.
+	This file IS the library, and only the library: loading it (via
+	require(), or loadstring(game:HttpGet(url))() from GitHub) hands you
+	back the UILibrary table below and does nothing else -- no window, no
+	tabs, nothing on screen. You write your own separate script that uses
+	it to build your own hub:
 
-	To make it yours: edit the BuildXTab() functions near the bottom of
-	this file (search for "YOUR HUB STARTS HERE"), or delete them and
-	write your own -- everything above that point is just the library
-	and doesn't need to be touched. See README.md for the full API.
+		local UILibrary = loadstring(game:HttpGet("<raw url to this file>"))()
+		local Window = UILibrary:CreateWindow({ Title = "My Hub" })
+		local Tab = Window:CreateTab({ Name = "Main" })
+		local Section = Tab:CreateSection({ Name = "General" })
+		Section:CreateButton({ Title = "Click me", Callback = function() end })
+
+	See Example.client.lua in this repo for a full multi-tab example, and
+	README.md for the complete API reference.
 ]]
 
 
@@ -4378,235 +4690,322 @@ function UILibrary:DestroyAll()
 	table.clear(self.Windows)
 end
 
-----------------------------------------------------------------------------
--- ============================ YOUR HUB STARTS HERE =======================
---
--- Everything above this line is the library. Everything below is a normal
--- script using it -- edit freely.
---
--- TABS & MODULES PATTERN
--- Each tab is built by its own `local function BuildXTab() ... end`. Think
--- of every one of these as a self-contained "module": it creates its own
--- Tab, adds whatever Sections/elements it wants, and touches nothing that
--- belongs to another tab. To add a tab to your hub:
---   1. Copy one of the BuildXTab() functions below as a starting point.
---   2. Rename it and change what it builds.
---   3. Call it in the list at the very bottom of this file.
--- To remove a tab, delete its function and its call at the bottom -- that's
--- the whole contract, nothing else references it.
---
--- MOBILE
--- On touch devices a small draggable accent-colored bubble appears
--- (bottom-right) that calls Window:Toggle() -- since there's no physical
--- ToggleKey to press. Keybind elements fall back to "tap to trigger"
--- automatically on devices with no keyboard.
-----------------------------------------------------------------------------
+-- Key System: a pre-hub authentication gate. Shows its own small window
+-- (independent of any Window you create afterwards), validates an entered
+-- key against a list or a custom callback, optionally remembers a valid
+-- key on disk so returning users skip straight through, then calls
+-- OnSuccess() -- that's where you'd call UILibrary:CreateWindow(...) and
+-- build the rest of your hub.
+--   UILibrary:CreateKeySystem({
+--       Title = "Key Required",
+--       SubTitle = "Join the Discord to get a key",
+--       Note = "Keys reset every 24 hours",
+--       Keys = { "abc123" },                     -- or:
+--       Callback = function(input) return true end, -- e.g. check a remote API
+--       SaveKey = true,                          -- default true
+--       ConfigFolder = "MyHub",
+--       Links = { { Title = "Get Key", Url = "https://discord.gg/..." } },
+--       OnSuccess = function() ... end,
+--   })
+function UILibrary:CreateKeySystem(props: { [string]: any })
+	props = props or {}
+	local folder = props.ConfigFolder or "UILibraryConfigs"
+	local saveKey = props.SaveKey ~= false
 
-local Window = UILibrary:CreateWindow({
-	Title = "My Hub",
-	SubTitle = "v" .. UILibrary.Version,
-	Theme = "Dark", -- Dark | Light | Midnight | Modern | Custom
-	Icon = "lucide:gamepad-2", -- see "Icons" below -- any Lucide name works here
-	Size = UDim2.fromOffset(680, 480),
-	MinSize = Vector2.new(480, 360),
-	ToggleKey = Enum.KeyCode.RightControl,
-	ConfigFolder = "MyHub",
-	BlurBackground = true,
-})
+	local function fileApiAvailable(): boolean
+		local ok, result = pcall(function()
+			return typeof(writefile) == "function"
+				and typeof(readfile) == "function"
+				and typeof(isfile) == "function"
+				and typeof(isfolder) == "function"
+				and typeof(makefolder) == "function"
+		end)
+		return ok and result == true
+	end
 
-----------------------------------------------------------------------------
--- Module: Main
-----------------------------------------------------------------------------
-local function BuildMainTab()
-	local Tab = Window:CreateTab({ Name = "Main", Icon = "lucide:house" })
-	local Actions = Tab:CreateSection({ Name = "Actions" })
+	local function loadSavedKey(): string?
+		if not (saveKey and fileApiAvailable()) then
+			return nil
+		end
+		local ok, result = pcall(function()
+			local path = folder .. "/key.txt"
+			if isfile(path) then
+				return readfile(path)
+			end
+			return nil
+		end)
+		if ok then
+			return result
+		end
+		return nil
+	end
 
-	Actions:CreateButton({
-		Title = "Say Hello",
-		Tooltip = "Fires a notification",
-		Callback = function()
-			Window:Notify({ Title = "Hello!", Content = "This is a notification.", Type = "Success", Duration = 4 })
-		end,
+	local function persistKey(key: string)
+		if not (saveKey and fileApiAvailable()) then
+			return
+		end
+		pcall(function()
+			if not isfolder(folder) then
+				makefolder(folder)
+			end
+			writefile(folder .. "/key.txt", key)
+		end)
+	end
+
+	local function validate(key: string): boolean
+		key = (key or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if key == "" then
+			return false
+		end
+		if props.Callback then
+			local ok, result = pcall(props.Callback, key)
+			return ok and result == true
+		end
+		if props.Keys then
+			for _, valid in ipairs(props.Keys) do
+				if key:lower() == tostring(valid):lower() then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	local function succeed()
+		if props.OnSuccess then
+			local ok, err = pcall(props.OnSuccess)
+			if not ok then
+				warn("[UILibrary] Key system OnSuccess error: " .. tostring(err))
+			end
+		end
+	end
+
+	-- Skip the whole UI if we already have a remembered, still-valid key.
+	local remembered = loadSavedKey()
+	if remembered and validate(remembered) then
+		succeed()
+		return
+	end
+
+	Themes.SetTheme(props.Theme or Themes.Current)
+
+	local screenGui = Creator.New("ScreenGui", {
+		Name = "UILibrary_KeySystem",
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		DisplayOrder = 1000,
 	})
+	local parented = pcall(function()
+		local hui = (typeof(gethui) == "function") and gethui() or nil
+		screenGui.Parent = hui or game:GetService("CoreGui")
+	end)
+	if not parented or not screenGui.Parent then
+		screenGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+	end
 
-	Actions:CreateToggle({
-		Title = "Enable Feature",
-		Default = true,
-		Flag = "enableFeature",
-		Callback = function(value)
-			print("Enable Feature:", value)
-		end,
+	local holder = Creator.New("Frame", {
+		Name = "Holder",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, -10),
+		Size = UDim2.fromOffset(340, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		ClipsDescendants = false,
+		Parent = screenGui,
 	})
+	Creator.Shadow(holder, 12, 0.5)
 
-	Actions:CreateSlider({
-		Title = "Walk Speed",
-		Min = 16,
-		Max = 100,
-		Default = 16,
-		Rounding = 0,
-		Flag = "walkSpeed",
-		Callback = function(value)
-			print("Walk Speed:", value)
-		end,
+	local card = Creator.New("Frame", {
+		Name = "Card",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Themes.Get("Background"),
+		BackgroundTransparency = 1,
+		Parent = holder,
+	}, {
+		Creator.Corner(12),
+		Creator.Stroke({ Color = Themes.Get("Border"), Thickness = 1 }),
+		Creator.Padding(22),
 	})
+	Themes.Register(card, { BackgroundColor3 = "Background" })
+	local cardStroke = card:FindFirstChildOfClass("UIStroke")
+	if cardStroke then
+		Themes.Register(cardStroke, { Color = "Border" })
+	end
+	Creator.ListLayout(Enum.FillDirection.Vertical, 10).Parent = card
 
-	local Options = Tab:CreateSection({ Name = "Options" })
-
-	Options:CreateTextbox({
-		Title = "Display Name",
-		Placeholder = "Enter a name...",
-		Flag = "displayName",
-		Callback = function(value)
-			print("Display Name:", value)
-		end,
+	local title = Creator.New("TextLabel", {
+		Name = "Title",
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Text = props.Title or "Key Required",
+		TextSize = 18,
+		TextColor3 = Themes.Get("Text"),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		LayoutOrder = 1,
+		Parent = card,
 	})
-end
+	Themes.Register(title, { TextColor3 = "Text" })
 
-----------------------------------------------------------------------------
--- Module: Visuals
-----------------------------------------------------------------------------
-local function BuildVisualsTab()
-	local Tab = Window:CreateTab({ Name = "Visuals", Icon = "lucide:palette" })
-	local Section = Tab:CreateSection({ Name = "Rendering" })
+	if props.SubTitle then
+		local sub = Creator.New("TextLabel", {
+			Name = "SubTitle",
+			Size = UDim2.new(1, 0, 0, 16),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Gotham,
+			Text = props.SubTitle,
+			TextSize = 12,
+			TextColor3 = Themes.Get("SubText"),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextWrapped = true,
+			LayoutOrder = 2,
+			Parent = card,
+		})
+		Themes.Register(sub, { TextColor3 = "SubText" })
+	end
 
-	Section:CreateDropdown({
-		Title = "Game Mode",
-		Options = { "Solo", "Duo", "Squad", "Custom" },
-		Default = "Solo",
-		Flag = "gameMode",
-		Callback = function(value)
-			print("Game Mode:", value)
-		end,
+	-- declared before the Links section (which references it) but placed
+	-- visually later via LayoutOrder, since UIListLayout orders by that
+	-- property, not by Instance creation order.
+	local statusLabel = Creator.New("TextLabel", {
+		Name = "Status",
+		Size = UDim2.new(1, 0, 0, 14),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		Text = props.Note or "",
+		TextSize = 11,
+		TextColor3 = Themes.Get("SubText"),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		LayoutOrder = 5,
+		Parent = card,
 	})
+	Themes.Register(statusLabel, { TextColor3 = "SubText" })
 
-	Section:CreateDropdown({
-		Title = "Active Modules",
-		Multi = true,
-		Options = { "ESP", "Tracers", "Fullbright", "Chams" },
-		Default = { "ESP" },
-		Flag = "activeModules",
-		Callback = function(values)
-			print("Active Modules:", table.concat(values, ", "))
-		end,
+	if props.Links and #props.Links > 0 then
+		local linkRow = Creator.New("Frame", {
+			Name = "Links",
+			Size = UDim2.new(1, 0, 0, 30),
+			BackgroundTransparency = 1,
+			LayoutOrder = 3,
+			Parent = card,
+		})
+		Creator.ListLayout(Enum.FillDirection.Horizontal, 8).Parent = linkRow
+		for _, link in ipairs(props.Links) do
+			local linkBtn = Creator.New("TextButton", {
+				Size = UDim2.fromOffset(0, 28),
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundColor3 = Themes.Get("Tertiary"),
+				AutoButtonColor = false,
+				Font = Enum.Font.GothamMedium,
+				Text = "  " .. (link.Title or "Get Key") .. "  ",
+				TextSize = 12,
+				TextColor3 = Themes.Get("Text"),
+				Parent = linkRow,
+			}, { Creator.Corner(6) })
+			Themes.Register(linkBtn, { BackgroundColor3 = "Tertiary", TextColor3 = "Text" })
+			linkBtn.MouseButton1Click:Connect(function()
+				local copied = pcall(function()
+					setclipboard(link.Url)
+				end)
+				statusLabel.Text = copied and "Link copied to clipboard." or ("Link: " .. tostring(link.Url))
+				statusLabel.TextColor3 = Themes.Get("SubText")
+			end)
+		end
+	end
+
+	local inputHolder = Creator.New("Frame", {
+		Name = "InputHolder",
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundColor3 = Themes.Get("Secondary"),
+		LayoutOrder = 4,
+		Parent = card,
+	}, { Creator.Corner(8), Creator.Stroke({ Color = Themes.Get("Border"), Thickness = 1 }) })
+	Themes.Register(inputHolder, { BackgroundColor3 = "Secondary" })
+	local inputStroke = inputHolder:FindFirstChildOfClass("UIStroke")
+	if inputStroke then
+		Themes.Register(inputStroke, { Color = "Border" })
+	end
+
+	local keyBox = Creator.New("TextBox", {
+		Name = "KeyBox",
+		Position = UDim2.new(0, 12, 0, 0),
+		Size = UDim2.new(1, -24, 1, 0),
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = "Enter key...",
+		Text = "",
+		TextSize = 13,
+		TextColor3 = Themes.Get("Text"),
+		PlaceholderColor3 = Themes.Get("SubText"),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false,
+		Parent = inputHolder,
 	})
+	Themes.Register(keyBox, { TextColor3 = "Text", PlaceholderColor3 = "SubText" })
 
-	Section:CreateColorPicker({
-		Title = "Highlight Color",
-		Default = Color3.fromRGB(88, 101, 242),
-		Flag = "highlightColor",
-		Callback = function(color)
-			print("Highlight Color:", color)
-		end,
-	})
+	local submitBtn = Creator.New("TextButton", {
+		Name = "Submit",
+		Size = UDim2.new(1, 0, 0, 38),
+		BackgroundColor3 = Themes.Get("Accent"),
+		AutoButtonColor = false,
+		Font = Enum.Font.GothamBold,
+		Text = "Submit",
+		TextSize = 14,
+		TextColor3 = Color3.new(1, 1, 1),
+		LayoutOrder = 6,
+		Parent = card,
+	}, { Creator.Corner(8), Creator.New("UIGradient", { Rotation = 90 }) })
+	Themes.Register(submitBtn, { BackgroundColor3 = "Accent" })
+	Themes.Register(submitBtn:FindFirstChildOfClass("UIGradient"), { Color = "AccentGradient" })
+	submitBtn.MouseEnter:Connect(function()
+		Creator.Snap(submitBtn, { BackgroundTransparency = 0.15 })
+	end)
+	submitBtn.MouseLeave:Connect(function()
+		Creator.Snap(submitBtn, { BackgroundTransparency = 0 })
+	end)
 
-	Section:CreateDivider()
+	-- entrance
+	Creator.Animate(holder, { Position = UDim2.new(0.5, 0, 0.5, 0) }, 0.3, Enum.EasingStyle.Back)
+	Creator.Animate(card, { BackgroundTransparency = 0 }, 0.25)
 
-	local progress = Section:CreateProgressBar({ Title = "Cache Warmup", Default = 0 })
-	task.spawn(function()
-		for i = 0, 100, 5 do
-			progress:Set(i / 100)
-			task.wait(0.05)
+	local function shake()
+		local original = UDim2.new(0.5, 0, 0.5, 0)
+		local offsets = { 8, -8, 6, -6, 3, 0 }
+		task.spawn(function()
+			for _, offset in ipairs(offsets) do
+				Creator.Snap(holder, { Position = original + UDim2.fromOffset(offset, 0) }, 0.04)
+				task.wait(0.04)
+			end
+		end)
+	end
+
+	local function attempt()
+		local key = keyBox.Text
+		if validate(key) then
+			persistKey(key)
+			statusLabel.Text = "Key accepted."
+			statusLabel.TextColor3 = Themes.Get("Success")
+			Creator.Animate(card, { BackgroundTransparency = 1 }, 0.2)
+			Creator.Animate(holder, { Position = UDim2.new(0.5, 0, 0.5, -10) }, 0.2)
+			task.delay(0.22, function()
+				screenGui:Destroy()
+			end)
+			succeed()
+		else
+			statusLabel.Text = "Invalid key. Try again."
+			statusLabel.TextColor3 = Themes.Get("Error")
+			shake()
+		end
+	end
+
+	submitBtn.MouseButton1Click:Connect(attempt)
+	keyBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			attempt()
 		end
 	end)
 end
 
-----------------------------------------------------------------------------
--- Module: Keybinds
--- Every Keybind fires Callback(true) on press and Callback(false) on
--- release. On a device with no keyboard (mobile), tapping the bound key
--- display fires press-then-release immediately instead of listening for
--- a physical key -- no special-casing needed in your own code.
-----------------------------------------------------------------------------
-local function BuildKeybindsTab()
-	local Tab = Window:CreateTab({ Name = "Keybinds", Icon = "lucide:key-round" })
-	local Section = Tab:CreateSection({ Name = "Bindings" })
-
-	Section:CreateKeybind({
-		Title = "Toggle UI",
-		Default = Enum.KeyCode.RightControl,
-		Flag = "toggleKeybind",
-		Tooltip = "Click, then press a key (Esc to clear)",
-		Callback = function(pressed)
-			if pressed then
-				print("Toggle UI keybind pressed")
-			end
-		end,
-	})
-
-	Section:CreateKeybind({
-		Title = "Farm Item",
-		Default = Enum.KeyCode.F,
-		Flag = "farmKeybind",
-		Callback = function(pressed)
-			print("Farm Item:", pressed)
-		end,
-	})
-
-	Section:CreateKeybind({
-		Title = "Panic Button",
-		Default = Enum.KeyCode.P,
-		Flag = "panicKeybind",
-		Callback = function(pressed)
-			if pressed then
-				Window:Notify({ Title = "Panic", Content = "Panic keybind triggered.", Type = "Warning", Duration = 3 })
-			end
-		end,
-	})
-end
-
-----------------------------------------------------------------------------
--- Module: Info -- static/dynamic text elements
-----------------------------------------------------------------------------
-local function BuildInfoTab()
-	local Tab = Window:CreateTab({ Name = "Info", Icon = "lucide:info" })
-	local Section = Tab:CreateSection({ Name = "About" })
-
-	Section:CreateLabel({ Text = "UILibrary Demo", Bold = true })
-	Section:CreateParagraph({
-		Title = "What is this?",
-		Content = "This tab shows Label, Paragraph and Divider -- plain display elements with no callback, useful for changelogs, instructions or credits.",
-	})
-	Section:CreateDivider()
-	Section:CreateLabel({ Text = "Built with UILibrary v" .. UILibrary.Version, Muted = true })
-end
-
-----------------------------------------------------------------------------
--- Module: Settings -- built-in live theme editor + config save/load
-----------------------------------------------------------------------------
-local function BuildSettingsTab()
-	local Tab = Window:CreateTab({ Name = "Settings", Icon = "lucide:settings" })
-
-	local ThemeSection = Tab:CreateSection({ Name = "Theme" })
-	UILibrary:CreateThemeEditor(ThemeSection)
-
-	local ConfigSection = Tab:CreateSection({ Name = "Config" })
-
-	ConfigSection:CreateButton({
-		Title = "Save Config",
-		Callback = function()
-			if Window.ConfigManager:Save("default") then
-				Window:Notify({ Title = "Config", Content = "Saved as 'default'.", Type = "Success" })
-			else
-				Window:Notify({ Title = "Config", Content = "Failed to save.", Type = "Error" })
-			end
-		end,
-	})
-
-	ConfigSection:CreateButton({
-		Title = "Load Config",
-		Callback = function()
-			if Window.ConfigManager:Load("default") then
-				Window:Notify({ Title = "Config", Content = "Loaded 'default'.", Type = "Info" })
-			else
-				Window:Notify({ Title = "Config", Content = "No saved config found.", Type = "Warning" })
-			end
-		end,
-	})
-end
-
--- Register every module here, in the order tabs should appear:
-BuildMainTab()
-BuildVisualsTab()
-BuildKeybindsTab()
-BuildInfoTab()
-BuildSettingsTab()
+return UILibrary
