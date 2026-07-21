@@ -1951,7 +1951,7 @@ local AuraLibrary = (function()
 				BackgroundTransparency = 1,
 				Size = UDim2.fromScale(1, 1),
 				CanvasSize = UDim2.new(0, 0, 0, 0),
-				AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y,
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
 				ScrollBarThickness = 4,
 				ScrollBarImageTransparency = 0.5,
 				ScrollBarImageColor3 = Theme.Get().SubText,
@@ -3480,7 +3480,7 @@ local AuraLibrary = (function()
 					Position = UDim2.new(0, 6, 0, listTop),
 					Size = UDim2.new(1, -12, 1, -listTop - 6),
 					CanvasSize = UDim2.new(0, 0, 0, 0),
-					AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y,
+					AutomaticCanvasSize = Enum.AutomaticSize.Y,
 					ScrollBarThickness = 3,
 					ZIndex = 901,
 					Parent = popup,
@@ -4909,7 +4909,7 @@ local AuraLibrary = (function()
 
 			local list = Create("ScrollingFrame", {
 				BackgroundTransparency = 1, Position = UDim2.new(0, 0, 0, 46), Size = UDim2.new(1, 0, 1, -46),
-				CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y,
+				CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
 				ScrollBarThickness = 3, Parent = panel,
 			})
 			Utility.ListLayout({ Padding = UDim.new(0, 2) }, list)
@@ -5574,7 +5574,7 @@ local AuraLibrary = (function()
 				BackgroundTransparency = 1,
 				Size = UDim2.new(1, 0, 1, hasInput and -36 or 0),
 				CanvasSize = UDim2.new(0, 0, 0, 0),
-				AutomaticCanvasSize = Enum.AutomaticCanvasSize.Y,
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
 				ScrollBarThickness = 3,
 				Parent = holder,
 			})
