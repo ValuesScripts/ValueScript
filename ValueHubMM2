@@ -8,6 +8,7 @@
 	 Rendering       : Pure Instance + TweenService, no external assets required
 	 Compatibility   : UNC executors (PC + Mobile), Synapse X, Script-Ware,
 	                   Fluxus, Krnl, Delta, etc.
+q
 
 	 Internally the file is organized as independent logical modules registered
 	 into a tiny dependency-injected module registry (register/import), so each
@@ -3606,13 +3607,36 @@ local AuraLibrary = (function()
 				Animator.Snap(stroke, { Color = colors.Border, Transparency = colors.BorderAlpha }, 0.15)
 			end
 
+			-- Serialized as "Kind:Name" since a bind may be either a KeyCode
+			-- (keyboard) or a UserInputType (mouse button). Enum categories
+			-- don't expose a readable `.Name` string (indexing one looks up
+			-- an item by that name instead), so the kind is hardcoded.
+			local function serializeBound(value)
+				if not value then return nil end
+				if value.EnumType == Enum.KeyCode then
+					return "KeyCode:" .. value.Name
+				end
+				return "UserInputType:" .. value.Name
+			end
+			local function deserializeBound(str)
+				if not str then return nil end
+				local kind, name = str:match("^(.-):(.+)$")
+				if not kind then return nil end
+				if kind == "KeyCode" then
+					return Enum.KeyCode[name]
+				elseif kind == "UserInputType" then
+					return Enum.UserInputType[name]
+				end
+				return nil
+			end
+
 			local function setBound(value, silent)
 				bound = value
 				chip.Text = bound and Input.LabelFor(bound) or "None"
 				if not silent then
 					if opts.Callback then task.spawn(opts.Callback, bound) end
 					api.Changed:Fire(bound)
-					if opts.Flag then Config.Set(opts.Flag, bound and (bound.EnumType.Name .. ":" .. bound.Name) or nil) end
+					if opts.Flag then Config.Set(opts.Flag, serializeBound(bound)) end
 				end
 			end
 
@@ -3652,20 +3676,6 @@ local AuraLibrary = (function()
 				conn2:Disconnect()
 				if breathing then breathing.Stop() end
 				card.Root:Destroy()
-			end
-
-			-- Serialized as "EnumType:Name" since a bind may be either a
-			-- KeyCode (keyboard) or a UserInputType (mouse button).
-			local function serializeBound(value)
-				if not value then return nil end
-				return value.EnumType.Name .. ":" .. value.Name
-			end
-			local function deserializeBound(str)
-				if not str then return nil end
-				local enumTypeName, enumName = str:match("^(.-):(.+)$")
-				if not enumTypeName then return nil end
-				local enumType = Enum[enumTypeName]
-				return enumType and enumType[enumName]
 			end
 
 			if opts.Flag then
