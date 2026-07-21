@@ -8,7 +8,6 @@
 	 Rendering       : Pure Instance + TweenService, no external assets required
 	 Compatibility   : UNC executors (PC + Mobile), Synapse X, Script-Ware,
 	                   Fluxus, Krnl, Delta, etc.
-q
 
 	 Internally the file is organized as independent logical modules registered
 	 into a tiny dependency-injected module registry (register/import), so each
@@ -3313,7 +3312,7 @@ local AuraLibrary = (function()
 			refreshLabel()
 
 			local popupOpen = false
-			local catcher, popup, renderConn
+			local catcher, popup, list, renderConn
 			local optionButtons = {}
 
 			local function closePopup()
@@ -3322,7 +3321,7 @@ local AuraLibrary = (function()
 				if renderConn then renderConn:Disconnect(); renderConn = nil end
 				Animator.Close(chevron, { Rotation = 0 }, 0.15)
 				local p, c = popup, catcher
-				popup, catcher = nil, nil
+				popup, catcher, list = nil, nil, nil
 				if p then
 					local tween = Animator.Close(p, { Size = UDim2.new(p.Size.X.Scale, p.Size.X.Offset, 0, 0) }, 0.16)
 					tween.Completed:Once(function() p:Destroy() end)
@@ -3405,12 +3404,12 @@ local AuraLibrary = (function()
 				row.MouseButton1Click:Connect(function()
 					selectOption(option)
 					-- refresh row visuals in place for multi (popup stays open)
-					if multi and popup then
-						for _, child in ipairs(popup.List:GetChildren()) do
+					if multi and popup and list then
+						for _, child in ipairs(list:GetChildren()) do
 							if child:IsA("TextButton") then child:Destroy() end
 						end
 						for _, o in ipairs(options) do
-							buildOptionRow(popup.List, o)
+							buildOptionRow(list, o)
 						end
 					end
 				end)
@@ -3475,7 +3474,7 @@ local AuraLibrary = (function()
 					listTop = 42
 				end
 
-				local list = Create("ScrollingFrame", {
+				list = Create("ScrollingFrame", {
 					Name = "List",
 					BackgroundTransparency = 1,
 					Position = UDim2.new(0, 6, 0, listTop),
@@ -3487,7 +3486,6 @@ local AuraLibrary = (function()
 					Parent = popup,
 				})
 				Utility.ListLayout({ Padding = UDim.new(0, 2) }, list)
-				popup.List = list
 
 				for _, option in ipairs(options) do
 					buildOptionRow(list, option)
