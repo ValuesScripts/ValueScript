@@ -2052,9 +2052,14 @@ local AuraLibrary = (function()
 		local Window = {}
 		Window.__index = Window
 
-		local function iconButton(parent, icon, colors, size)
+		-- Window chrome (minimize/maximize/close/collapse) is rendered with text
+		-- glyphs rather than rbxassetid images: glyphs always render correctly
+		-- with zero external asset dependency, so this chrome can never show up
+		-- blank or as the wrong icon regardless of executor/asset availability.
+		local function iconButton(parent, glyph, colors, size)
 			size = size or 28
-			local btn = Create("ImageButton", {
+			local btn = Create("TextButton", {
+				Text = "",
 				BackgroundColor3 = colors.Text,
 				BackgroundTransparency = 1,
 				AutoButtonColor = false,
@@ -2062,13 +2067,13 @@ local AuraLibrary = (function()
 				Parent = parent,
 			})
 			Utility.Corner(8, btn)
-			local img = Create("ImageLabel", {
-				Image = icon,
-				ImageColor3 = colors.SubText,
+			local label = Create("TextLabel", {
+				Text = glyph,
+				Font = Enum.Font.GothamBold,
+				TextSize = size >= 28 and 13 or 11,
+				TextColor3 = colors.SubText,
 				BackgroundTransparency = 1,
-				Size = UDim2.fromOffset(11, 11),
-				Position = UDim2.fromScale(0.5, 0.5),
-				AnchorPoint = Vector2.new(0.5, 0.5),
+				Size = UDim2.fromScale(1, 1),
 				Parent = btn,
 			})
 			btn.MouseEnter:Connect(function()
@@ -2077,7 +2082,7 @@ local AuraLibrary = (function()
 			btn.MouseLeave:Connect(function()
 				Animator.Smooth(btn, { BackgroundTransparency = 1 }, 0.15)
 			end)
-			return btn, img
+			return btn, label
 		end
 
 		function Window.new(root, opts, ctx)
@@ -2111,7 +2116,7 @@ local AuraLibrary = (function()
 				ClipsDescendants = true,
 				Parent = root,
 			})
-			Acrylic.Apply(self.Root, { Strength = 0.7, Radius = 16 })
+			Acrylic.Apply(self.Root, { Strength = 0.7, Radius = 10 })
 			Utility.Shadow({ Transparency = 0.45, Spread = 60 }, self.Root)
 
 			-- opening animation
@@ -2180,15 +2185,15 @@ local AuraLibrary = (function()
 			Utility.ListLayout({ FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), HorizontalAlignment = Enum.HorizontalAlignment.Right }, controls)
 
 			if opts.Minimizable ~= false then
-				local minBtn = iconButton(controls, Icons.Minimize, colors)
+				local minBtn = iconButton(controls, "—", colors)
 				minBtn.MouseButton1Click:Connect(function() self:ToggleMinimize() end)
 			end
 			if opts.Maximizable ~= false then
-				local maxBtn = iconButton(controls, Icons.Maximize, colors)
+				local maxBtn = iconButton(controls, "▢", colors)
 				maxBtn.MouseButton1Click:Connect(function() self:ToggleMaximize() end)
 			end
 			if opts.Closable ~= false then
-				local closeBtn = iconButton(controls, Icons.Close, colors)
+				local closeBtn = iconButton(controls, "✕", colors)
 				closeBtn.MouseButton1Click:Connect(function() self:Close() end)
 			end
 
@@ -2205,13 +2210,15 @@ local AuraLibrary = (function()
 
 			self.Sidebar = Create("Frame", {
 				Name = "Sidebar",
-				BackgroundColor3 = colors.ElevatedAlt,
-				BackgroundTransparency = 0.4,
-				Size = UDim2.new(0, self.SidebarWidth, 1, -12),
-				Position = UDim2.new(0, 6, 0, 6),
+				BorderSizePixel = 0,
+				Size = UDim2.new(0, self.SidebarWidth, 1, -20),
+				Position = UDim2.new(0, 10, 0, 10),
 				Parent = self.Body,
 			})
-			Utility.Corner(12, self.Sidebar)
+			-- Lighter acrylic strength than the window itself so the sidebar
+			-- reads as a distinct, still-glassy inner panel rather than a
+			-- flat opaque slab stacked on top of the window's own acrylic tint.
+			Acrylic.Apply(self.Sidebar, { Strength = 0.35, Radius = 12 })
 
 			self.TabList = Create("Frame", {
 				Name = "TabList",
@@ -2242,7 +2249,7 @@ local AuraLibrary = (function()
 				Position = UDim2.new(0, 0, 1, -38),
 				Parent = self.Sidebar,
 			})
-			local collapseBtn, collapseIcon = iconButton(collapseRow, Icons.ChevronLeft, colors, 26)
+			local collapseBtn, collapseIcon = iconButton(collapseRow, "‹", colors, 26)
 			collapseBtn.Position = UDim2.new(1, -8, 0.5, 0)
 			collapseBtn.AnchorPoint = Vector2.new(1, 0.5)
 			collapseBtn.MouseButton1Click:Connect(function() self:ToggleSidebar() end)
@@ -2251,8 +2258,8 @@ local AuraLibrary = (function()
 			self.ContentSwapper = Create("Frame", {
 				Name = "ContentSwapper",
 				BackgroundTransparency = 1,
-				Position = UDim2.new(0, self.SidebarWidth + 12, 0, 0),
-				Size = UDim2.new(1, -(self.SidebarWidth + 18), 1, -6),
+				Position = UDim2.new(0, self.SidebarWidth + 16, 0, 0),
+				Size = UDim2.new(1, -(self.SidebarWidth + 22), 1, -10),
 				ClipsDescendants = true,
 				Parent = self.Body,
 			})
@@ -2412,10 +2419,10 @@ local AuraLibrary = (function()
 		function Window:ToggleSidebar()
 			self.SidebarExpanded = not self.SidebarExpanded
 			local width = self.SidebarExpanded and self.SidebarWidth or self.SidebarCollapsedWidth
-			Animator.Smooth(self.Sidebar, { Size = UDim2.new(0, width, 1, -12) }, 0.28)
+			Animator.Smooth(self.Sidebar, { Size = UDim2.new(0, width, 1, -20) }, 0.28)
 			Animator.Smooth(self.ContentSwapper, {
-				Position = UDim2.new(0, width + 12, 0, 0),
-				Size = UDim2.new(1, -(width + 18), 1, -6),
+				Position = UDim2.new(0, width + 16, 0, 0),
+				Size = UDim2.new(1, -(width + 22), 1, -10),
 			}, 0.28)
 			Animator.Smooth(self._collapseIcon, { Rotation = self.SidebarExpanded and 0 or 180 }, 0.28)
 			for _, entry in ipairs(self.SidebarItems) do
