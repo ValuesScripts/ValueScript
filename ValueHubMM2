@@ -240,6 +240,98 @@ local Creator = (function()
 		return s
 	end
 
+	-- Lucide icon support ("lucide:icon-name", matching WindUI's own
+	-- convention), backed by the real open-source lucide-roblox icon data
+	-- (https://github.com/VirtualButFake/lucide-roblox), fetched once and
+	-- cached. Requires a script executor (loadstring + HttpGet); falls
+	-- back to no icon rather than erroring when that's unavailable (plain
+	-- Studio, no internet, etc.) so a missing icon never breaks the UI.
+	local LUCIDE_DATA_URL = "https://raw.githubusercontent.com/VirtualButFake/lucide-roblox/master/src/icons.luau"
+	local lucideData: { any }? = nil
+	local lucideLoadAttempted = false
+
+	local function loadLucideData(): { any }?
+		if lucideLoadAttempted then
+			return lucideData
+		end
+		lucideLoadAttempted = true
+		local ok, result = pcall(function()
+			return loadstring(game:HttpGet(LUCIDE_DATA_URL))()
+		end)
+		if ok then
+			lucideData = result
+		else
+			warn("[UILibrary] Lucide icons unavailable (needs a script executor with loadstring/HttpGet): " .. tostring(result))
+		end
+		return lucideData
+	end
+
+	-- Mirrors lucide-roblox's own GetAsset(name, size) algorithm against
+	-- the fetched icon set: {Id, Url, ImageRectSize, ImageRectOffset}.
+	function Creator.GetLucideAsset(name: string, size: number?): { [string]: any }?
+		local data = loadLucideData()
+		if not data then
+			return nil
+		end
+		local iconIndices: { string } = data[1]
+		local idIndices: { number } = data[2]
+		local iconRegistry: { [number]: any } = data[3]
+
+		local iconIndex = table.find(iconIndices, name)
+		if not iconIndex then
+			return nil
+		end
+
+		size = size or 48
+		local currentDifference = math.huge
+		local currentSize = size
+		for registrySize in pairs(iconRegistry) do
+			local diff = math.abs(size - registrySize)
+			if diff < currentDifference then
+				currentDifference = diff
+				currentSize = registrySize
+			end
+		end
+
+		local icon = iconRegistry[currentSize][iconIndex]
+		if icon == nil then
+			return nil
+		end
+
+		return {
+			Id = idIndices[icon[1]],
+			Url = "rbxassetid://" .. idIndices[icon[1]],
+			ImageRectSize = Vector2.new(icon[2][1], icon[2][2]),
+			ImageRectOffset = Vector2.new(icon[3][1], icon[3][2]),
+		}
+	end
+
+	-- Applies an Icon prop to an ImageLabel. Accepts everything
+	-- ResolveIcon does (asset id/rbxassetid/rbxasset/http url), plus
+	-- "lucide:icon-name" for the full Lucide set via GetLucideAsset.
+	function Creator.ApplyIcon(imageLabel: ImageLabel, icon: (string | number)?, size: number?)
+		if typeof(icon) == "string" and (icon :: string):match("^lucide:") then
+			local name = (icon :: string):sub(8)
+			local asset = Creator.GetLucideAsset(name, size)
+			if asset then
+				imageLabel.Image = asset.Url
+				imageLabel.ImageRectOffset = asset.ImageRectOffset
+				imageLabel.ImageRectSize = asset.ImageRectSize
+				return
+			end
+			-- fetch failed or name not found -- leave blank rather than
+			-- showing a broken/mismatched sprite region
+			imageLabel.Image = ""
+			imageLabel.ImageRectOffset = Vector2.zero
+			imageLabel.ImageRectSize = Vector2.zero
+			return
+		end
+
+		imageLabel.Image = Creator.ResolveIcon(icon)
+		imageLabel.ImageRectOffset = Vector2.zero
+		imageLabel.ImageRectSize = Vector2.zero
+	end
+
 	return Creator
 end)()
 
@@ -3461,15 +3553,15 @@ local Window = (function()
 		Themes.Register(topBar, { BackgroundColor3 = "Secondary" })
 
 		if props.Icon then
-			Creator.New("ImageLabel", {
+			local titleIcon = Creator.New("ImageLabel", {
 				Name = "Icon",
 				Size = UDim2.fromOffset(20, 20),
 				Position = UDim2.new(0, 14, 0.5, -10),
 				BackgroundTransparency = 1,
-				Image = Creator.ResolveIcon(props.Icon),
 				ZIndex = 4,
 				Parent = topBar,
 			})
+			Creator.ApplyIcon(titleIcon, props.Icon, 24)
 		end
 
 		local titleX = props.Icon and 44 or 16
@@ -3752,6 +3844,68 @@ local Window = (function()
 			self:CloseActivePopup()
 		end)
 
+		-- Mobile toggle bubble -- touch devices have no ToggleKey, so give
+		-- them a small draggable floating button that Window:Toggle()s.
+		-- Lives directly on the ScreenGui (not the Holder), and the
+		-- ScreenGui itself is never disabled, so this keeps working even
+		-- while the window is hidden.
+		if UserInputService.TouchEnabled then
+			local fabHolder = Creator.New("Frame", {
+				Name = "MobileToggleHolder",
+				AnchorPoint = Vector2.new(1, 1),
+				Position = UDim2.new(1, -18, 1, -100),
+				Size = UDim2.fromOffset(52, 52),
+				BackgroundTransparency = 1,
+				ClipsDescendants = false,
+				ZIndex = 999,
+				Parent = screenGui,
+			})
+			if not self.LowGraphicsMode then
+				Creator.Shadow(fabHolder, 26, 0.35)
+			end
+
+			local fab = Creator.New("TextButton", {
+				Name = "MobileToggle",
+				Size = UDim2.new(1, 0, 1, 0),
+				BackgroundColor3 = Themes.Get("Accent"),
+				AutoButtonColor = false,
+				Text = "\226\152\176",
+				Font = Enum.Font.GothamBold,
+				TextSize = 20,
+				TextColor3 = Color3.new(1, 1, 1),
+				ZIndex = 1000,
+				Parent = fabHolder,
+			}, {
+				Creator.Corner(999),
+				Creator.Stroke({ Color = Color3.new(1, 1, 1), Thickness = 1, Transparency = 0.7 }),
+			})
+			Themes.Register(fab, { BackgroundColor3 = "Accent" })
+
+			local dragDistance = 0
+			Draggable.MakeDraggable(fab, fabHolder, {
+				OnStart = function()
+					dragDistance = 0
+				end,
+				OnUpdate = function()
+					dragDistance += 1
+				end,
+			})
+			fab.MouseButton1Click:Connect(function()
+				if dragDistance < 4 then
+					self:Toggle()
+				end
+			end)
+			fab.MouseButton1Down:Connect(function()
+				Creator.Snap(fab, { Size = UDim2.new(0.88, 0, 0.88, 0), Position = UDim2.new(0.06, 0, 0.06, 0) }, 0.08)
+			end)
+			fab.MouseButton1Up:Connect(function()
+				Creator.Snap(fab, { Size = UDim2.new(1, 0, 1, 0), Position = UDim2.new(0, 0, 0, 0) }, 0.12)
+			end)
+
+			self.FAB = fab
+			self.FABHolder = fabHolder
+		end
+
 		-- Notifications + tooltips ------------------------------------------------
 		self.Notifications = Notification.new(screenGui)
 		self.TooltipManager = Tooltip.new(screenGui)
@@ -3884,17 +4038,30 @@ local Window = (function()
 			Parent = self.TabScroll,
 		}, { Creator.Corner(6) })
 
+		-- Active-tab accent indicator: a thin bar that grows in on the left
+		-- edge of the selected tab. Pure vector (no image asset needed).
+		local indicator = Creator.New("Frame", {
+			Name = "Indicator",
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 4, 0.5, 0),
+			Size = UDim2.fromOffset(3, 0),
+			BackgroundColor3 = Themes.Get("Accent"),
+			ZIndex = 5,
+			Parent = button,
+		}, { Creator.Corner(2) })
+		Themes.Register(indicator, { BackgroundColor3 = "Accent" })
+
 		if props.Icon then
-			Creator.New("ImageLabel", {
+			local tabIcon = Creator.New("ImageLabel", {
 				Size = UDim2.fromOffset(16, 16),
 				Position = UDim2.new(0, 10, 0.5, -8),
 				BackgroundTransparency = 1,
-				Image = Creator.ResolveIcon(props.Icon),
 				ImageColor3 = Themes.Get("SubText"),
 				Name = "Icon",
 				ZIndex = 5,
 				Parent = button,
 			})
+			Creator.ApplyIcon(tabIcon, props.Icon, 16)
 		end
 
 		local label = Creator.New("TextLabel", {
@@ -3942,6 +4109,9 @@ local Window = (function()
 			Creator.Animate(label, {
 				TextColor3 = active and Themes.Get("Text") or Themes.Get("SubText"),
 			}, 0.15)
+			Creator.Animate(indicator, {
+				Size = active and UDim2.fromOffset(3, 18) or UDim2.fromOffset(3, 0),
+			}, 0.2, Enum.EasingStyle.Back)
 			local icon = button:FindFirstChild("Icon")
 			if icon then
 				Creator.Animate(icon, {
@@ -4006,6 +4176,25 @@ local Window = (function()
 		tab.Page.Position = originalPos + UDim2.fromOffset(0, 6)
 		Creator.Animate(tab.Page, { Position = originalPos }, 0.18)
 
+		-- staggered pop-in for each section card on this tab: slide up +
+		-- fade in, offset by a growing delay so cards cascade in rather
+		-- than all appearing at once.
+		for index, section in ipairs(tab.Sections) do
+			local root = section.Root
+			if root and root.Parent then
+				local settledPos = root.Position
+				local settledTransparency = root.BackgroundTransparency
+				root.Position = settledPos + UDim2.fromOffset(0, 12)
+				root.BackgroundTransparency = 1
+				task.delay(math.min((index - 1) * 0.05, 0.25), function()
+					if root.Parent then
+						Creator.Animate(root, { Position = settledPos }, 0.24, Enum.EasingStyle.Back)
+						Creator.Animate(root, { BackgroundTransparency = settledTransparency }, 0.24)
+					end
+				end)
+			end
+		end
+
 		self.TabChanged:Fire(tab)
 	end
 
@@ -4035,7 +4224,7 @@ local Window = (function()
 			return
 		end
 		self.Visible = true
-		self.ScreenGui.Enabled = true
+		self.Holder.Visible = true
 		if self.BlurBackground and not self.LowGraphicsMode then
 			self:_applyBlur(true)
 		end
@@ -4051,7 +4240,9 @@ local Window = (function()
 		end
 		self.Visible = false
 		self:_applyBlur(false)
-		self.ScreenGui.Enabled = false
+		-- Holder (not the whole ScreenGui) so the mobile toggle bubble and
+		-- notifications keep working while the window itself is hidden.
+		self.Holder.Visible = false
 		self.VisibilityChanged:Fire(false)
 	end
 
@@ -4189,15 +4380,33 @@ end
 
 ----------------------------------------------------------------------------
 -- ============================ YOUR HUB STARTS HERE =======================
+--
 -- Everything above this line is the library. Everything below is a normal
--- script using it -- edit freely, delete what you don't want, add tabs by
--- copying a BuildXTab() function and calling it near the bottom.
+-- script using it -- edit freely.
+--
+-- TABS & MODULES PATTERN
+-- Each tab is built by its own `local function BuildXTab() ... end`. Think
+-- of every one of these as a self-contained "module": it creates its own
+-- Tab, adds whatever Sections/elements it wants, and touches nothing that
+-- belongs to another tab. To add a tab to your hub:
+--   1. Copy one of the BuildXTab() functions below as a starting point.
+--   2. Rename it and change what it builds.
+--   3. Call it in the list at the very bottom of this file.
+-- To remove a tab, delete its function and its call at the bottom -- that's
+-- the whole contract, nothing else references it.
+--
+-- MOBILE
+-- On touch devices a small draggable accent-colored bubble appears
+-- (bottom-right) that calls Window:Toggle() -- since there's no physical
+-- ToggleKey to press. Keybind elements fall back to "tap to trigger"
+-- automatically on devices with no keyboard.
 ----------------------------------------------------------------------------
 
 local Window = UILibrary:CreateWindow({
 	Title = "My Hub",
 	SubTitle = "v" .. UILibrary.Version,
 	Theme = "Dark", -- Dark | Light | Midnight | Modern | Custom
+	Icon = "lucide:gamepad-2", -- see "Icons" below -- any Lucide name works here
 	Size = UDim2.fromOffset(680, 480),
 	MinSize = Vector2.new(480, 360),
 	ToggleKey = Enum.KeyCode.RightControl,
@@ -4205,12 +4414,11 @@ local Window = UILibrary:CreateWindow({
 	BlurBackground = true,
 })
 
--- Each Build_Tab function is a self-contained "module" -- keep your hub
--- organised by giving every tab its own function like this, even though
--- it all lives in one file.
-
+----------------------------------------------------------------------------
+-- Module: Main
+----------------------------------------------------------------------------
 local function BuildMainTab()
-	local Tab = Window:CreateTab({ Name = "Main" })
+	local Tab = Window:CreateTab({ Name = "Main", Icon = "lucide:house" })
 	local Actions = Tab:CreateSection({ Name = "Actions" })
 
 	Actions:CreateButton({
@@ -4252,21 +4460,13 @@ local function BuildMainTab()
 			print("Display Name:", value)
 		end,
 	})
-
-	Options:CreateKeybind({
-		Title = "Toggle UI",
-		Default = Enum.KeyCode.RightControl,
-		Flag = "toggleKeybind",
-		Callback = function(pressed)
-			if pressed then
-				print("Toggle keybind pressed")
-			end
-		end,
-	})
 end
 
+----------------------------------------------------------------------------
+-- Module: Visuals
+----------------------------------------------------------------------------
 local function BuildVisualsTab()
-	local Tab = Window:CreateTab({ Name = "Visuals" })
+	local Tab = Window:CreateTab({ Name = "Visuals", Icon = "lucide:palette" })
 	local Section = Tab:CreateSection({ Name = "Rendering" })
 
 	Section:CreateDropdown({
@@ -4298,10 +4498,83 @@ local function BuildVisualsTab()
 			print("Highlight Color:", color)
 		end,
 	})
+
+	Section:CreateDivider()
+
+	local progress = Section:CreateProgressBar({ Title = "Cache Warmup", Default = 0 })
+	task.spawn(function()
+		for i = 0, 100, 5 do
+			progress:Set(i / 100)
+			task.wait(0.05)
+		end
+	end)
 end
 
+----------------------------------------------------------------------------
+-- Module: Keybinds
+-- Every Keybind fires Callback(true) on press and Callback(false) on
+-- release. On a device with no keyboard (mobile), tapping the bound key
+-- display fires press-then-release immediately instead of listening for
+-- a physical key -- no special-casing needed in your own code.
+----------------------------------------------------------------------------
+local function BuildKeybindsTab()
+	local Tab = Window:CreateTab({ Name = "Keybinds", Icon = "lucide:key-round" })
+	local Section = Tab:CreateSection({ Name = "Bindings" })
+
+	Section:CreateKeybind({
+		Title = "Toggle UI",
+		Default = Enum.KeyCode.RightControl,
+		Flag = "toggleKeybind",
+		Tooltip = "Click, then press a key (Esc to clear)",
+		Callback = function(pressed)
+			if pressed then
+				print("Toggle UI keybind pressed")
+			end
+		end,
+	})
+
+	Section:CreateKeybind({
+		Title = "Farm Item",
+		Default = Enum.KeyCode.F,
+		Flag = "farmKeybind",
+		Callback = function(pressed)
+			print("Farm Item:", pressed)
+		end,
+	})
+
+	Section:CreateKeybind({
+		Title = "Panic Button",
+		Default = Enum.KeyCode.P,
+		Flag = "panicKeybind",
+		Callback = function(pressed)
+			if pressed then
+				Window:Notify({ Title = "Panic", Content = "Panic keybind triggered.", Type = "Warning", Duration = 3 })
+			end
+		end,
+	})
+end
+
+----------------------------------------------------------------------------
+-- Module: Info -- static/dynamic text elements
+----------------------------------------------------------------------------
+local function BuildInfoTab()
+	local Tab = Window:CreateTab({ Name = "Info", Icon = "lucide:info" })
+	local Section = Tab:CreateSection({ Name = "About" })
+
+	Section:CreateLabel({ Text = "UILibrary Demo", Bold = true })
+	Section:CreateParagraph({
+		Title = "What is this?",
+		Content = "This tab shows Label, Paragraph and Divider -- plain display elements with no callback, useful for changelogs, instructions or credits.",
+	})
+	Section:CreateDivider()
+	Section:CreateLabel({ Text = "Built with UILibrary v" .. UILibrary.Version, Muted = true })
+end
+
+----------------------------------------------------------------------------
+-- Module: Settings -- built-in live theme editor + config save/load
+----------------------------------------------------------------------------
 local function BuildSettingsTab()
-	local Tab = Window:CreateTab({ Name = "Settings" })
+	local Tab = Window:CreateTab({ Name = "Settings", Icon = "lucide:settings" })
 
 	local ThemeSection = Tab:CreateSection({ Name = "Theme" })
 	UILibrary:CreateThemeEditor(ThemeSection)
@@ -4331,6 +4604,9 @@ local function BuildSettingsTab()
 	})
 end
 
+-- Register every module here, in the order tabs should appear:
 BuildMainTab()
 BuildVisualsTab()
+BuildKeybindsTab()
+BuildInfoTab()
 BuildSettingsTab()
