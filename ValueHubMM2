@@ -612,24 +612,24 @@ local AuraLibrary = (function()
 		local function c(r, g, b) return Color3.fromRGB(r, g, b) end
 
 		Theme.Themes["Dark"] = {
-			Background      = c(18, 18, 24),
-			Elevated        = c(26, 26, 34),
-			ElevatedAlt     = c(32, 32, 41),
-			Accent          = c(114, 137, 255),
-			AccentHover     = c(134, 155, 255),
-			AccentActive    = c(96, 117, 235),
-			Text            = c(240, 240, 245),
-			SubText         = c(170, 170, 182),
-			MutedText       = c(120, 120, 133),
+			Background      = c(14, 14, 19),
+			Elevated        = c(24, 24, 32),
+			ElevatedAlt     = c(34, 34, 45),
+			Accent          = c(124, 145, 255),
+			AccentHover     = c(148, 166, 255),
+			AccentActive    = c(102, 122, 235),
+			Text            = c(244, 244, 248),
+			SubText         = c(175, 176, 190),
+			MutedText       = c(122, 123, 138),
 			Border          = c(255, 255, 255),
-			BorderAlpha     = 0.92,
+			BorderAlpha     = 0.91,
 			Divider         = c(255, 255, 255),
-			Success         = c(87, 210, 143),
-			Warning         = c(255, 189, 89),
-			Error           = c(255, 99, 112),
-			Info            = c(96, 178, 255),
-			Overlay         = c(10, 10, 14),
-			Glow            = c(114, 137, 255),
+			Success         = c(94, 214, 150),
+			Warning         = c(255, 193, 94),
+			Error           = c(255, 106, 118),
+			Info            = c(104, 184, 255),
+			Overlay         = c(8, 8, 12),
+			Glow            = c(124, 145, 255),
 		}
 
 		Theme.Themes["Midnight"] = {
@@ -785,13 +785,23 @@ local AuraLibrary = (function()
 
 		local Icons = {}
 
-		-- Built-in chrome icons are sprites cut from the Lucide icon set as
-		-- packaged by lucide-roblox (github.com/latte-soft/lucide-roblox) —
-		-- the same icon source used by WindUI. Each entry carries its sheet
-		-- id plus the ImageRectOffset/ImageRectSize crop for that glyph, so
-		-- call sites set Image/ImageRectOffset/ImageRectSize directly instead
-		-- of guessing a standalone per-icon asset id.
-		local function sprite(id, x, y, w, h)
+		-- Built-in chrome icons carry TWO representations:
+		--   1) a sprite cut from the Lucide icon set as packaged by
+		--      lucide-roblox (github.com/latte-soft/lucide-roblox), the same
+		--      icon source WindUI uses — real, verified asset ids extracted
+		--      directly from that repo's data file.
+		--   2) a single-character text glyph fallback.
+		-- Icons.UseImages controls which one Icons.Apply renders. It defaults
+		-- to false: this library ships to unknown executors/games, and there
+		-- is no way to confirm from here that a given asset id is public and
+		-- loads on every one of them — a failed image renders as silently
+		-- blank. The glyph path has zero external dependency and is what
+		-- actually got visually confirmed working on-device. Flip
+		-- Icons.UseImages = true if you've verified the images load fine on
+		-- your target executor and want the real icon art instead.
+		Icons.UseImages = false
+
+		local function sprite(id, x, y, w, h, glyph)
 			w = w or 48
 			h = h or 48
 			return {
@@ -799,53 +809,96 @@ local AuraLibrary = (function()
 				Url = "rbxassetid://" .. id,
 				Rect = Vector2.new(x, y),
 				Size = Vector2.new(w, h),
+				Glyph = glyph or "",
 			}
 		end
 
-		Icons.ChevronDown  = sprite(16898612819, 196, 918)
-		Icons.ChevronUp    = sprite(16898612819, 710, 918)
-		Icons.ChevronLeft  = sprite(16898612819, 404, 967)
-		Icons.ChevronRight = sprite(16898612819, 869, 759)
-		Icons.Check        = sprite(16898612819, 710, 869)
-		Icons.Close        = sprite(16898613869, 869, 906) -- "x"
-		Icons.Search       = sprite(16898613699, 918, 857)
-		Icons.Minimize     = sprite(16898613613, 771, 196) -- "minus"
-		Icons.Maximize     = sprite(16898613777, 869, 710) -- "square"
+		Icons.ChevronDown  = sprite(16898612819, 196, 918, nil, nil, "v")
+		Icons.ChevronUp    = sprite(16898612819, 710, 918, nil, nil, "^")
+		Icons.ChevronLeft  = sprite(16898612819, 404, 967, nil, nil, "<")
+		Icons.ChevronRight = sprite(16898612819, 869, 759, nil, nil, ">")
+		Icons.Check        = sprite(16898612819, 710, 869, nil, nil, "\226\156\147") -- ✓
+		Icons.Close        = sprite(16898613869, 869, 906, nil, nil, "\226\156\149") -- ✕ ("x")
+		Icons.Search       = sprite(16898613699, 918, 857, nil, nil, "")
+		Icons.Minimize     = sprite(16898613613, 771, 196, nil, nil, "\226\128\148") -- — ("minus")
+		Icons.Maximize     = sprite(16898613777, 869, 710, nil, nil, "\226\150\162") -- ▢ ("square")
 		Icons.Restore      = Icons.Maximize
-		Icons.Copy         = sprite(16898613044, 918, 612)
-		Icons.Menu         = sprite(16898613613, 49, 820)
-		Icons.Plus         = sprite(16898613699, 257, 918)
-		Icons.Settings     = sprite(16898613777, 771, 257)
-		Icons.Info         = sprite(16898613509, 612, 869)
-		Icons.Success      = sprite(16898612819, 869, 710) -- "check-circle"
-		Icons.Warning      = sprite(16898612629, 771, 98)  -- "alert-triangle"
-		Icons.Error        = sprite(16898613869, 771, 955) -- "x-circle"
-		Icons.Loading      = sprite(16898613509, 710, 967) -- "loader"
-		Icons.Keybind      = sprite(16898613509, 453, 820) -- "keyboard"
-		Icons.Trash        = sprite(16898613869, 257, 918) -- "trash-2"
-		Icons.Eye          = sprite(16898613353, 771, 563)
-		Icons.EyeOff       = sprite(16898613353, 820, 514)
-		Icons.Palette      = sprite(16898613613, 453, 918)
-		Icons.Home         = sprite(16898613509, 820, 147)
-		Icons.User         = sprite(16898613869, 661, 869)
-		Icons.Star         = sprite(16898613777, 967, 147)
-		Icons.Bell         = sprite(16898612819, 820, 257)
-		Icons.Grid         = sprite(16898613509, 98, 771)   -- "grid-3x3"
-		Icons.List         = sprite(16898613509, 869, 808)
-		Icons.Terminal     = sprite(16898613869, 820, 257)
-		Icons.Folder       = sprite(16898613353, 404, 967)
-		Icons.Image        = sprite(16898613509, 306, 918)
-		Icons.Link         = sprite(16898613509, 918, 453)
-		Icons.Filter       = sprite(16898613353, 612, 869)
-		Icons.Dot          = sprite(16898613044, 771, 355)  -- "circle"
+		Icons.Copy         = sprite(16898613044, 918, 612, nil, nil, "")
+		Icons.Menu         = sprite(16898613613, 49, 820, nil, nil, "")
+		Icons.Plus         = sprite(16898613699, 257, 918, nil, nil, "+")
+		Icons.Settings     = sprite(16898613777, 771, 257, nil, nil, "")
+		Icons.Info         = sprite(16898613509, 612, 869, nil, nil, "i")
+		Icons.Success      = sprite(16898612819, 869, 710, nil, nil, "\226\156\147") -- "check-circle"
+		Icons.Warning      = sprite(16898612629, 771, 98,  nil, nil, "!")           -- "alert-triangle"
+		Icons.Error        = sprite(16898613869, 771, 955, nil, nil, "\226\156\149") -- "x-circle"
+		Icons.Loading      = sprite(16898613509, 710, 967, nil, nil, "o")           -- "loader"
+		Icons.Keybind      = sprite(16898613509, 453, 820, nil, nil, "")            -- "keyboard"
+		Icons.Trash        = sprite(16898613869, 257, 918, nil, nil, "")            -- "trash-2"
+		Icons.Eye          = sprite(16898613353, 771, 563, nil, nil, "")
+		Icons.EyeOff       = sprite(16898613353, 820, 514, nil, nil, "")
+		Icons.Palette      = sprite(16898613613, 453, 918, nil, nil, "")
+		Icons.Home         = sprite(16898613509, 820, 147, nil, nil, "")
+		Icons.User         = sprite(16898613869, 661, 869, nil, nil, "")
+		Icons.Star         = sprite(16898613777, 967, 147, nil, nil, "")
+		Icons.Bell         = sprite(16898612819, 820, 257, nil, nil, "")
+		Icons.Grid         = sprite(16898613509, 98, 771,  nil, nil, "")            -- "grid-3x3"
+		Icons.List         = sprite(16898613509, 869, 808, nil, nil, "")
+		Icons.Terminal     = sprite(16898613869, 820, 257, nil, nil, "")
+		Icons.Folder       = sprite(16898613353, 404, 967, nil, nil, "")
+		Icons.Image        = sprite(16898613509, 306, 918, nil, nil, "")
+		Icons.Link         = sprite(16898613509, 918, 453, nil, nil, "")
+		Icons.Filter       = sprite(16898613353, 612, 869, nil, nil, "")
+		Icons.Dot          = sprite(16898613044, 771, 355, nil, nil, ".") -- "circle"
 
-		-- Applies a built-in sprite icon (one of the Icons.X tables above) to
-		-- an ImageLabel/ImageButton: sets Image + the sprite-sheet crop.
+		-- Applies a built-in icon (one of the Icons.X tables above) to an
+		-- ImageLabel/ImageButton. When Icons.UseImages is false (default) it
+		-- renders the glyph fallback instead: the target instance's own
+		-- image is hidden and a TextLabel sibling is added showing the
+		-- glyph, live-synced to the target's Rotation/ImageColor3 so
+		-- existing rotate/tween code (chevron open state, hover color, etc)
+		-- keeps working unmodified.
 		function Icons.Apply(imageInstance, icon)
-			if type(icon) ~= "table" or not icon.Id then return end
-			imageInstance.Image = icon.Url
-			imageInstance.ImageRectOffset = icon.Rect
-			imageInstance.ImageRectSize = icon.Size
+			if type(icon) ~= "table" then return end
+
+			if Icons.UseImages and icon.Id then
+				imageInstance.Image = icon.Url
+				imageInstance.ImageRectOffset = icon.Rect
+				imageInstance.ImageRectSize = icon.Size
+				return
+			end
+
+			if icon.Glyph == "" then return end
+
+			-- Note: imageInstance.Image is deliberately left unset (blank) in
+			-- this path, so its ImageTransparency has nothing to render
+			-- anyway — it's left untouched rather than forced, so callers
+			-- that animate ImageTransparency to show/hide the icon (e.g. the
+			-- Toggle checkbox's checkmark) keep working: that tween is
+			-- mirrored onto the glyph's TextTransparency below instead of
+			-- being fought over on the same property.
+			local label = Instance.new("TextLabel")
+			label.Name = "GlyphFallback"
+			label.BackgroundTransparency = 1
+			label.Text = icon.Glyph
+			label.Font = Enum.Font.GothamBold
+			label.TextSize = 13
+			label.TextScaled = false
+			label.TextColor3 = imageInstance.ImageColor3
+			label.TextTransparency = imageInstance.ImageTransparency
+			label.Size = UDim2.fromScale(1, 1)
+			label.Rotation = imageInstance.Rotation
+			label.ZIndex = imageInstance.ZIndex
+			label.Parent = imageInstance
+
+			imageInstance:GetPropertyChangedSignal("Rotation"):Connect(function()
+				label.Rotation = imageInstance.Rotation
+			end)
+			imageInstance:GetPropertyChangedSignal("ImageColor3"):Connect(function()
+				label.TextColor3 = imageInstance.ImageColor3
+			end)
+			imageInstance:GetPropertyChangedSignal("ImageTransparency"):Connect(function()
+				label.TextTransparency = imageInstance.ImageTransparency
+			end)
 		end
 
 		-- Resolves a user-supplied icon value (Tab/Window/Avatar/Card ...):
@@ -2324,8 +2377,8 @@ local AuraLibrary = (function()
 			self.ContentSwapper = Create("Frame", {
 				Name = "ContentSwapper",
 				BackgroundTransparency = 1,
-				Position = UDim2.new(0, self.SidebarWidth + 16, 0, 0),
-				Size = UDim2.new(1, -(self.SidebarWidth + 22), 1, -10),
+				Position = UDim2.new(0, self.SidebarWidth + 16, 0, 10),
+				Size = UDim2.new(1, -(self.SidebarWidth + 26), 1, -20),
 				ClipsDescendants = true,
 				Parent = self.Body,
 			})
@@ -2455,9 +2508,26 @@ local AuraLibrary = (function()
 			local previous = self.ActiveTab
 			self.ActiveTab = tab
 
+			-- Closing any open dropdown/color-picker/date-picker popup here
+			-- matters more than tidiness: those popups spawn a full-screen
+			-- invisible "click catcher" frame parented to the root ScreenGui,
+			-- independent of the tab/section that opened it. Leaving one open
+			-- across a tab switch would strand it forever, silently eating
+			-- every click on the whole screen (including outside the window).
+			if self.Ctx.PopupCloser then
+				self.Ctx.PopupCloser()
+				self.Ctx.PopupCloser = nil
+			end
+
 			for _, entry in ipairs(self.SidebarItems) do
 				local active = entry.Tab == tab
 				entry.Active = active
+				-- Always reset the item's own background (rather than only
+				-- when inactive) so a tab that was hovered right before being
+				-- selected doesn't stay stuck highlighted after focus moves
+				-- elsewhere; the active tab is indicated by the sliding pill,
+				-- not by the item's own background.
+				Animator.Smooth(entry.Item, { BackgroundTransparency = 1 }, 0.15)
 				Animator.Smooth(entry.Label, { TextColor3 = active and colors.Text or colors.SubText }, 0.15)
 				if entry.IconImg then
 					Animator.Smooth(entry.IconImg, { ImageColor3 = active and colors.Accent or colors.SubText }, 0.15)
@@ -2468,18 +2538,27 @@ local AuraLibrary = (function()
 				end
 			end
 
+			-- Crossfade: incoming content renders above outgoing content
+			-- (explicit ZIndex, since both briefly overlap in the same
+			-- ContentSwapper region) and each slides out to a *different*
+			-- edge than it entered from, tuned with a longer, gentler curve
+			-- so the switch reads as a smooth glide rather than a snap.
+			tab.Content.ZIndex = 2
+			tab.Content.Position = UDim2.new(0, 20, 0, 0)
+			tab:Show()
+			Animator.Tween(tab.Content, { Position = UDim2.new(0, 0, 0, 0) }, 0.32, Animator.Easing.Exponential, Enum.EasingDirection.Out)
+
 			if previous then
 				local oldContent = previous.Content
-				Animator.Tween(oldContent, { Position = UDim2.new(0, -14, 0, 0) }, 0.18, Animator.Easing.Sine, Enum.EasingDirection.In)
-				task.delay(0.16, function()
-					previous:Hide()
-					oldContent.Position = UDim2.new(0, 0, 0, 0)
+				oldContent.ZIndex = 1
+				local outTween = Animator.Tween(oldContent, { Position = UDim2.new(0, -20, 0, 0) }, 0.26, Animator.Easing.Circular, Enum.EasingDirection.In)
+				outTween.Completed:Once(function()
+					if self.ActiveTab ~= previous then
+						previous:Hide()
+						oldContent.Position = UDim2.new(0, 0, 0, 0)
+					end
 				end)
 			end
-
-			tab.Content.Position = UDim2.new(0, 14, 0, 0)
-			tab:Show()
-			Animator.Tween(tab.Content, { Position = UDim2.new(0, 0, 0, 0) }, 0.22, Animator.Easing.Quint, Enum.EasingDirection.Out)
 
 			self.TabChanged:Fire(tab)
 		end
@@ -2489,8 +2568,8 @@ local AuraLibrary = (function()
 			local width = self.SidebarExpanded and self.SidebarWidth or self.SidebarCollapsedWidth
 			Animator.Smooth(self.Sidebar, { Size = UDim2.new(0, width, 1, -20) }, 0.28)
 			Animator.Smooth(self.ContentSwapper, {
-				Position = UDim2.new(0, width + 16, 0, 0),
-				Size = UDim2.new(1, -(width + 22), 1, -10),
+				Position = UDim2.new(0, width + 16, 0, 10),
+				Size = UDim2.new(1, -(width + 26), 1, -20),
 			}, 0.28)
 			Animator.Smooth(self._collapseIcon, { Rotation = self.SidebarExpanded and 0 or 180 }, 0.28)
 			for _, entry in ipairs(self.SidebarItems) do
@@ -2531,6 +2610,7 @@ local AuraLibrary = (function()
 
 		function Window:Hide()
 			self.Visible = false
+			if self.Ctx.PopupCloser then self.Ctx.PopupCloser(); self.Ctx.PopupCloser = nil end
 			local tween = Animator.Close(self.Root, { Size = UDim2.fromOffset(self.Root.Size.X.Offset * 0.94, self.Root.Size.Y.Offset * 0.94) }, 0.2)
 			tween.Completed:Once(function()
 				if not self.Visible then self.Root.Visible = false end
@@ -2542,6 +2622,7 @@ local AuraLibrary = (function()
 		end
 
 		function Window:Close()
+			if self.Ctx.PopupCloser then self.Ctx.PopupCloser(); self.Ctx.PopupCloser = nil end
 			local tween = Animator.Close(self.Root, {
 				Size = UDim2.fromOffset(self.Root.Size.X.Offset * 0.9, self.Root.Size.Y.Offset * 0.9),
 			}, 0.25)
@@ -3398,6 +3479,7 @@ local AuraLibrary = (function()
 			local function closePopup()
 				if not popupOpen then return end
 				popupOpen = false
+				if ctx.PopupCloser == closePopup then ctx.PopupCloser = nil end
 				if renderConn then renderConn:Disconnect(); renderConn = nil end
 				Animator.Close(chevron, { Rotation = 0 }, 0.15)
 				local p, c = popup, catcher
@@ -3497,6 +3579,8 @@ local AuraLibrary = (function()
 			end
 
 			local function openPopup()
+				if ctx.PopupCloser then ctx.PopupCloser() end
+				ctx.PopupCloser = closePopup
 				popupOpen = true
 				Animator.Snap(chevron, { Rotation = 180 }, 0.15)
 
@@ -3835,6 +3919,7 @@ local AuraLibrary = (function()
 			local function closePopup()
 				if not popupOpen then return end
 				popupOpen = false
+				if ctx.PopupCloser == closePopup then ctx.PopupCloser = nil end
 				if renderConn then renderConn:Disconnect(); renderConn = nil end
 				local p, c = popup, catcher
 				popup, catcher = nil, nil
@@ -3846,6 +3931,8 @@ local AuraLibrary = (function()
 			end
 
 			local function openPopup()
+				if ctx.PopupCloser then ctx.PopupCloser() end
+				ctx.PopupCloser = closePopup
 				popupOpen = true
 				catcher = Create("TextButton", {
 					Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
@@ -4199,27 +4286,30 @@ local AuraLibrary = (function()
 				TextYAlignment = Enum.TextYAlignment.Top,
 				TextWrapped = true,
 				BackgroundTransparency = 1,
-				Size = UDim2.new(1, -28, 0, 0),
+				Size = UDim2.new(1, -48, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
 				Parent = holder,
 			})
 
-			local copyBtn = Create("ImageButton", {
-				ImageColor3 = colors.MutedText,
+			local copyBtn = Create("TextButton", {
+				Text = "Copy",
+				Font = Enum.Font.GothamMedium,
+				TextSize = 11,
+				TextColor3 = colors.MutedText,
 				BackgroundTransparency = 1,
-				AutoButtonColor = false,
-				Size = UDim2.fromOffset(14, 14),
+				Size = UDim2.fromOffset(34, 14),
 				Position = UDim2.new(1, 0, 0, 0),
 				AnchorPoint = Vector2.new(1, 0),
 				Parent = holder,
 			})
-			Icons.Apply(copyBtn, Icons.Copy)
 			copyBtn.MouseButton1Click:Connect(function()
 				if type(setclipboard) == "function" then
 					setclipboard(code.Text)
-					Animator.Snap(copyBtn, { ImageColor3 = colors.Success }, 0.15)
+					copyBtn.Text = "Copied"
+					Animator.Snap(copyBtn, { TextColor3 = colors.Success }, 0.15)
 					task.delay(0.6, function()
-						Animator.Snap(copyBtn, { ImageColor3 = colors.MutedText }, 0.2)
+						copyBtn.Text = "Copy"
+						Animator.Snap(copyBtn, { TextColor3 = colors.MutedText }, 0.2)
 					end)
 				end
 			end)
@@ -5844,6 +5934,7 @@ local AuraLibrary = (function()
 			local function closePopup()
 				if not popupOpen then return end
 				popupOpen = false
+				if ctx.PopupCloser == closePopup then ctx.PopupCloser = nil end
 				if renderConn then renderConn:Disconnect() end
 				local p, c = popup, catcher
 				popup, catcher = nil, nil
@@ -5852,6 +5943,8 @@ local AuraLibrary = (function()
 			end
 
 			local function openPopup()
+				if ctx.PopupCloser then ctx.PopupCloser() end
+				ctx.PopupCloser = closePopup
 				popupOpen = true
 				local viewMonth, viewYear = date.Month, date.Year
 
@@ -6019,12 +6112,15 @@ local AuraLibrary = (function()
 
 				local spawned = { center }
 				local function close()
+					if ctx.PopupCloser == close then ctx.PopupCloser = nil end
 					catcher:Destroy()
 					for _, inst in ipairs(spawned) do
 						Animator.Close(inst, { Size = UDim2.fromOffset(0, 0) }, 0.16)
 					end
 					task.delay(0.18, function() wrap:Destroy() end)
 				end
+				if ctx.PopupCloser then ctx.PopupCloser() end
+				ctx.PopupCloser = close
 				catcher.MouseButton1Click:Connect(close)
 
 				for i, item in ipairs(items) do
@@ -6254,16 +6350,30 @@ local AuraLibrary = (function()
 			Utility.Corner(1000, mobileBtn)
 			Utility.Shadow({ Transparency = 0.4, Spread = 22 }, mobileBtn)
 
-			local hamburgerIcon = Utility.Create("ImageLabel", {
-				ImageColor3 = Color3.new(1, 1, 1),
+			-- Hamburger glyph built from three bars instead of routing through
+			-- an image/font glyph — guaranteed to render identically
+			-- everywhere with zero asset or font-coverage dependency, which
+			-- matters most here since this button is how mobile players open
+			-- the whole UI.
+			local hamburgerHolder = Utility.Create("Frame", {
 				BackgroundTransparency = 1,
-				Size = UDim2.fromOffset(22, 22),
+				Size = UDim2.fromOffset(20, 14),
 				Position = UDim2.fromScale(0.5, 0.5),
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				ZIndex = 1001,
 				Parent = mobileBtn,
 			})
-			Icons.Apply(hamburgerIcon, Icons.Menu)
+			for i = 0, 2 do
+				local bar = Utility.Create("Frame", {
+					BackgroundColor3 = Color3.new(1, 1, 1),
+					BorderSizePixel = 0,
+					Size = UDim2.new(1, 0, 0, 2),
+					Position = UDim2.new(0, 0, 0, i * 6),
+					ZIndex = 1002,
+					Parent = hamburgerHolder,
+				})
+				Utility.Corner(1, bar)
+			end
 
 			local dragging, startPos, startInputPos, totalDelta = false, nil, nil, 0
 
