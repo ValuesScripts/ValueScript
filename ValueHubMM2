@@ -1025,6 +1025,157 @@ local RuthlessHub = (function()
 			return overlay
 		end
 
+		-- ---------- Squircle corners (opt-in) ----------
+		-- Real continuous-curvature "squircle" corners — the smoother,
+		-- Apple/WindUI-style curve a plain UICorner radius can't reproduce —
+		-- using the same public sprite set WindUI itself ships (verified
+		-- working since it's what a live, widely-used library depends on,
+		-- unlike a freshly-guessed asset id). A flat UICorner is added first
+		-- as a safety net, so if the sprite ever fails to load for a given
+		-- executor the panel still reads as a normal rounded rect instead of
+		-- a hard square.
+		local SQUIRCLE_SPRITES = {
+			Square = { Image = "rbxassetid://89641024074289", Rect = Rect.new(460, 460, 460, 460) },
+			Wide   = { Image = "rbxassetid://125083578015333", Rect = Rect.new(512, 325, 512, 325) },
+			Tall   = { Image = "rbxassetid://124965260437653", Rect = Rect.new(325, 512, 325, 512) },
+		}
+
+		function Acrylic.Squircle(target, opts)
+			opts = opts or {}
+			local color = opts.Color or target.BackgroundColor3
+
+			if not target:FindFirstChildOfClass("UICorner") then
+				Utility.Corner(opts.Radius or 20, target)
+			end
+
+			local squircle = target:FindFirstChild("__Squircle")
+			if not squircle then
+				squircle = Create("ImageLabel", {
+					Name = "__Squircle",
+					BackgroundTransparency = 1,
+					ScaleType = Enum.ScaleType.Slice,
+					Size = UDim2.fromScale(1, 1),
+					ZIndex = -5,
+					Parent = target,
+				})
+			end
+
+			local absSize = target.AbsoluteSize
+			local shape = SQUIRCLE_SPRITES.Square
+			if absSize.X > absSize.Y * 1.15 then
+				shape = SQUIRCLE_SPRITES.Wide
+			elseif absSize.Y > absSize.X * 1.15 then
+				shape = SQUIRCLE_SPRITES.Tall
+			end
+			squircle.Image = shape.Image
+			squircle.SliceCenter = shape.Rect
+			squircle.ImageColor3 = color
+
+			target.BackgroundTransparency = 1
+
+			return squircle
+		end
+
+		-- ---------- Real optical blur (opt-in) ----------
+		-- The "Fluent blur" trick (credited to Fluent's Dawid, also used by
+		-- WindUI): a real Part with Material=Glass, positioned in 3D world
+		-- space every time the camera or the target GUI's screen bounds
+		-- change so it exactly overlaps the target's on-screen rectangle.
+		-- Roblox's Glass material renders genuine depth-of-field blur behind
+		-- it (when the player's graphics quality supports it), unlike the
+		-- simulated gradient layers Acrylic.Apply uses elsewhere. This spawns
+		-- a Part in Workspace and hooks Camera property signals, which is
+		-- more invasive than a pure-GUI effect, so it's opt-in only.
+		function Acrylic.RealBlur(guiObject, opts)
+			opts = opts or {}
+			local RunService = game:GetService("RunService")
+			local Workspace = game:GetService("Workspace")
+			local distance = opts.Distance or 0.05
+
+			local folder = Workspace:FindFirstChild("__AcrylicBlurParts")
+			if not folder then
+				folder = Instance.new("Folder")
+				folder.Name = "__AcrylicBlurParts"
+				folder.Parent = Workspace
+			end
+
+			local part = Instance.new("Part")
+			part.Name = "AcrylicBlur"
+			part.Material = Enum.Material.Glass
+			part.Color = Color3.new(0, 0, 0)
+			part.Size = Vector3.new(1, 1, 0)
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Locked = true
+			part.CastShadow = false
+			part.Transparency = opts.Transparency or 0.05
+			local mesh = Instance.new("SpecialMesh")
+			mesh.MeshType = Enum.MeshType.Brick
+			mesh.Offset = Vector3.new(0, 0, -0.000001)
+			mesh.Parent = part
+			part.Parent = folder
+
+			local function toWorld(camera, location)
+				local unitRay = camera:ScreenPointToRay(location.X, location.Y)
+				return unitRay.Origin + unitRay.Direction * distance
+			end
+
+			local running = true
+			local function render()
+				if not running or not guiObject.Parent then return end
+				local camera = Workspace.CurrentCamera
+				if not camera then return end
+
+				local absSize = guiObject.AbsoluteSize
+				local absPos = guiObject.AbsolutePosition
+				local topLeft3D = toWorld(camera, absPos)
+				local topRight3D = toWorld(camera, absPos + Vector2.new(absSize.X, 0))
+				local bottomRight3D = toWorld(camera, absPos + absSize)
+
+				local width = (topRight3D - topLeft3D).Magnitude
+				local height = (topRight3D - bottomRight3D).Magnitude
+
+				part.CFrame = CFrame.fromMatrix((topLeft3D + bottomRight3D) / 2, camera.CFrame.XVector, camera.CFrame.YVector, camera.CFrame.ZVector)
+				mesh.Scale = Vector3.new(width, height, 0)
+			end
+
+			local connections = {}
+			local function bindCamera()
+				local camera = Workspace.CurrentCamera
+				if not camera then return end
+				table.insert(connections, camera:GetPropertyChangedSignal("CFrame"):Connect(render))
+				table.insert(connections, camera:GetPropertyChangedSignal("ViewportSize"):Connect(render))
+				table.insert(connections, camera:GetPropertyChangedSignal("FieldOfView"):Connect(render))
+			end
+			bindCamera()
+			table.insert(connections, Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+				for _, c in ipairs(connections) do
+					if c.Connected then c:Disconnect() end
+				end
+				connections = {}
+				bindCamera()
+				render()
+			end))
+			table.insert(connections, guiObject:GetPropertyChangedSignal("AbsoluteSize"):Connect(render))
+			table.insert(connections, guiObject:GetPropertyChangedSignal("AbsolutePosition"):Connect(render))
+			render()
+
+			return {
+				SetVisible = function(visible)
+					part.Transparency = visible and (opts.Transparency or 0.05) or 1
+				end,
+				Destroy = function()
+					running = false
+					for _, c in ipairs(connections) do
+						if c.Connected then c:Disconnect() end
+					end
+					part:Destroy()
+				end,
+			}
+		end
+
 		return Acrylic
 	end)
 
@@ -2227,6 +2378,16 @@ local RuthlessHub = (function()
 			Acrylic.Apply(self.Root, { Strength = 0.7, Radius = 10 })
 			Utility.Shadow({ Transparency = 0.45, Spread = 60 }, self.Root)
 
+			-- Opt-in premium upgrades — off by default since they can't be
+			-- verified to render correctly on every executor from here, but
+			-- available if you've confirmed they work for you.
+			if opts.Squircle then
+				Acrylic.Squircle(self.Root, { Radius = 10 })
+			end
+			if opts.RealBlur then
+				self.RealBlur = Acrylic.RealBlur(self.Root, opts.RealBlurOptions)
+			end
+
 			-- opening animation: scale/back-ease in, plus a one-shot accent
 			-- glow flash behind the window that fades out as it settles.
 			self.Root.Size = UDim2.fromOffset(size.X.Offset * 0.92, size.Y.Offset * 0.92)
@@ -2633,6 +2794,7 @@ local RuthlessHub = (function()
 		function Window:Show()
 			self.Visible = true
 			self.Root.Visible = true
+			if self.RealBlur then self.RealBlur.SetVisible(true) end
 			self.Root.Size = UDim2.fromOffset(self.WindowedSize.X.Offset * 0.94, self.WindowedSize.Y.Offset * 0.94)
 			Animator.Open(self.Root, { Size = self.WindowedSize }, 0.35)
 		end
@@ -2640,6 +2802,7 @@ local RuthlessHub = (function()
 		function Window:Hide()
 			self.Visible = false
 			if self.Ctx.PopupCloser then self.Ctx.PopupCloser(); self.Ctx.PopupCloser = nil end
+			if self.RealBlur then self.RealBlur.SetVisible(false) end
 			local tween = Animator.Close(self.Root, { Size = UDim2.fromOffset(self.Root.Size.X.Offset * 0.94, self.Root.Size.Y.Offset * 0.94) }, 0.2)
 			tween.Completed:Once(function()
 				if not self.Visible then self.Root.Visible = false end
@@ -2664,6 +2827,7 @@ local RuthlessHub = (function()
 
 		function Window:Destroy()
 			self.Maid:Destroy()
+			if self.RealBlur then self.RealBlur.Destroy() end
 			for _, tab in ipairs(self.Tabs) do
 				tab:Destroy()
 			end
