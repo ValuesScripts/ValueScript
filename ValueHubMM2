@@ -2227,11 +2227,34 @@ local RuthlessHub = (function()
 			Acrylic.Apply(self.Root, { Strength = 0.7, Radius = 10 })
 			Utility.Shadow({ Transparency = 0.45, Spread = 60 }, self.Root)
 
-			-- opening animation
+			-- opening animation: scale/back-ease in, plus a one-shot accent
+			-- glow flash behind the window that fades out as it settles.
 			self.Root.Size = UDim2.fromOffset(size.X.Offset * 0.92, size.Y.Offset * 0.92)
 			local targetSize = UDim2.fromOffset(size.X.Offset, size.Y.Offset)
 			self.WindowedSize = targetSize
 			Animator.Open(self.Root, { Size = targetSize }, 0.45)
+
+			-- Parented as a sibling of Root (not inside it) since Root clips
+			-- descendants to its own rectangle — a glow meant to bloom
+			-- beyond the window's edges would otherwise be invisible.
+			local glowHolder = Create("Frame", {
+				Name = "OpenGlow",
+				BackgroundTransparency = 1,
+				Size = targetSize,
+				Position = self.Root.Position,
+				ZIndex = -1,
+				Parent = root,
+			})
+			local openGlow = Utility.Glow({ Color = colors.Accent, Transparency = 0.75, Spread = 90, Radius = 16, ZIndex = -1 }, glowHolder)
+			for _, layer in ipairs(openGlow:GetChildren()) do
+				local targetTransparency = layer.BackgroundTransparency
+				layer.BackgroundTransparency = 1
+				local inTween = Animator.Tween(layer, { BackgroundTransparency = targetTransparency }, 0.25, Animator.Easing.Sine, Enum.EasingDirection.Out)
+				inTween.Completed:Once(function()
+					Animator.Tween(layer, { BackgroundTransparency = 1 }, 0.5, Animator.Easing.Sine, Enum.EasingDirection.In)
+				end)
+			end
+			task.delay(0.85, function() glowHolder:Destroy() end)
 
 			-- ================= Titlebar =================
 			self.Titlebar = Create("Frame", {
@@ -2322,11 +2345,13 @@ local RuthlessHub = (function()
 			-- whenever there are only a few tabs.
 			self.Sidebar = Create("Frame", {
 				Name = "Sidebar",
-				BackgroundTransparency = 1,
+				BackgroundColor3 = colors.ElevatedAlt,
+				BackgroundTransparency = 0.82,
 				Size = UDim2.new(0, self.SidebarWidth, 1, -20),
 				Position = UDim2.new(0, 10, 0, 10),
 				Parent = self.Body,
 			})
+			Utility.Corner(12, self.Sidebar)
 
 			self.SidebarDivider = Create("Frame", {
 				Name = "SidebarDivider",
@@ -2360,6 +2385,10 @@ local RuthlessHub = (function()
 				Parent = self.TabList,
 			})
 			Utility.Corner(9, self.Indicator)
+			Utility.Stroke({ Color = colors.Accent, Thickness = 1, Transparency = 0.6 }, self.Indicator)
+			-- Subtle breathing glow on the active-tab pill for a bit of life
+			-- rather than a flat static highlight.
+			Animator.Breathe(self.Indicator, "BackgroundTransparency", 0.8, 0.88, 1.8)
 
 			local collapseRow = Create("Frame", {
 				Name = "CollapseRow",
@@ -6155,31 +6184,92 @@ local RuthlessHub = (function()
 		-- ---------- Floating Button (draggable, section-attached) ----------
 		local function buildFloatingButton(parent, opts, ctx)
 			local colors = Theme.Get()
+			local size = opts.Size or 52
+			local startPos = opts.Position or UDim2.new(1, -80, 1, -80)
+
 			local btn = Create("ImageButton", {
 				Image = Icons.Resolve(opts.Icon) or "",
 				ImageColor3 = colors.Text,
 				BackgroundColor3 = colors.Accent,
 				AutoButtonColor = false,
-				Size = UDim2.fromOffset(opts.Size or 52, opts.Size or 52),
-				Position = opts.Position or UDim2.new(1, -80, 1, -80),
+				Size = UDim2.fromOffset(size, size),
+				Position = startPos,
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				ZIndex = 700,
 				Parent = ctx.Root,
 			})
 			Utility.Corner(1000, btn)
 			Utility.Shadow({ Transparency = 0.5, Spread = 20 }, btn)
+			local lockStroke = Utility.Stroke({ Color = colors.Warning, Thickness = 2, Transparency = 1 }, btn)
 
-			if opts.Draggable then
-				Draggable.Make(btn, btn, { Bounds = true })
+			local locked = opts.Locked == true
+			local dragController
+			local api = {}
+			api.Changed = import("Signal").new()
+			api.Instance = btn
+
+			local function serializePos(pos)
+				return { XS = pos.X.Scale, XO = pos.X.Offset, YS = pos.Y.Scale, YO = pos.Y.Offset }
 			end
+			local function deserializePos(t)
+				return UDim2.new(t.XS, t.XO, t.YS, t.YO)
+			end
+
+			local function saveIfFlagged()
+				if opts.Flag then Config.Set(opts.Flag, serializePos(btn.Position)) end
+			end
+
+			local function applyDraggable()
+				if dragController then dragController.Destroy(); dragController = nil end
+				if not locked and opts.Draggable ~= false then
+					dragController = Draggable.Make(btn, btn, { Bounds = true, OnEnd = saveIfFlagged })
+				end
+			end
+
+			-- Move it around like normal; right-click toggles a lock so it
+			-- can be pinned in place once you've found a spot you like —
+			-- while locked, dragging is disabled and a subtle amber ring
+			-- shows it's pinned.
+			local function setLocked(value)
+				locked = value
+				applyDraggable()
+				Animator.Smooth(lockStroke, { Transparency = locked and 0.3 or 1 }, 0.2)
+				api.Changed:Fire(locked)
+			end
+
+			btn.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton2 and opts.Lockable ~= false then
+					setLocked(not locked)
+				end
+			end)
+
+			applyDraggable()
+			if locked then Animator.Smooth(lockStroke, { Transparency = 0.3 }, 0.01) end
+
 			btn.MouseButton1Click:Connect(function()
 				if opts.Callback then task.spawn(opts.Callback) end
 			end)
-			btn.MouseEnter:Connect(function() Animator.Snap(btn, { Size = UDim2.fromOffset((opts.Size or 52) * 1.08, (opts.Size or 52) * 1.08) }, 0.15) end)
-			btn.MouseLeave:Connect(function() Animator.Snap(btn, { Size = UDim2.fromOffset(opts.Size or 52, opts.Size or 52) }, 0.15) end)
+			btn.MouseEnter:Connect(function() Animator.Snap(btn, { Size = UDim2.fromOffset(size * 1.08, size * 1.08) }, 0.15) end)
+			btn.MouseLeave:Connect(function() Animator.Snap(btn, { Size = UDim2.fromOffset(size, size) }, 0.15) end)
 
-			local api = { Instance = btn }
-			function api.Destroy() btn:Destroy() end
+			function api.Lock() setLocked(true) end
+			function api.Unlock() setLocked(false) end
+			function api.IsLocked() return locked end
+			function api.SetPosition(pos, silent)
+				btn.Position = pos
+				if not silent then saveIfFlagged() end
+			end
+			function api.Destroy()
+				if dragController then dragController.Destroy() end
+				btn:Destroy()
+			end
+
+			if opts.Flag then
+				Config.Register(opts.Flag, serializePos(startPos), function(v)
+					btn.Position = deserializePos(v)
+				end)
+			end
+
 			return api
 		end
 		Registry.Register("FloatingButton", buildFloatingButton, { "FloatingButton" })
@@ -6314,7 +6404,15 @@ local RuthlessHub = (function()
 
 		function Library:SaveConfig(name) return Config.Save(name) end
 		function Library:LoadConfig(name) return Config.Load(name) end
-		function Library:SetAutoSave(enabled, name) Config.SetAutoSave(enabled, name) end
+		-- Enabling autosave also marks that same profile to auto-load on the
+		-- next execution, so a single call gets you "remember everything"
+		-- behavior without wiring SetLoadOnStartup separately.
+		function Library:SetAutoSave(enabled, name)
+			Config.SetAutoSave(enabled, name)
+			if enabled then
+				Config.SetLoadOnStartup(name or "autosave")
+			end
+		end
 		function Library:SetLoadOnStartup(name) return Config.SetLoadOnStartup(name) end
 		function Library:ExportConfig() return Config.Export() end
 		function Library:ImportConfig(json, activate) return Config.Import(json, activate) end
