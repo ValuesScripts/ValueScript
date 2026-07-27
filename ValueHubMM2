@@ -1,6 +1,6 @@
 --[[
 	================================================================================
-	 AURA UI LIBRARY
+	 RUTHLESS HUB — UI LIBRARY
 	 A premium, glassmorphism-inspired Roblox executor UI library.
 	 Single-file distributable — load via loadstring(game:HttpGet(URL))().
 
@@ -16,7 +16,7 @@
 	================================================================================
 ]]
 
-local AuraLibrary = (function()
+local RuthlessHub = (function()
 
 	--============================================================================
 	-- MODULE REGISTRY (tiny DI container — lazy, memoized, order independent)
@@ -35,7 +35,7 @@ local AuraLibrary = (function()
 			return cached
 		end
 		local factory = ModuleRegistry[name]
-		assert(factory, "[Aura] Unknown module: " .. tostring(name))
+		assert(factory, "[RuthlessHub] Unknown module: " .. tostring(name))
 		local result = factory(import)
 		ModuleCache[name] = result
 		return result
@@ -1301,7 +1301,7 @@ local AuraLibrary = (function()
 		local Signal = import("Signal")
 
 		local Config = {}
-		Config.FolderName = "AuraLibrary"
+		Config.FolderName = "RuthlessHub"
 		Config.Flags = {}         -- flagName -> current value
 		Config.Changed = Signal.new()
 
@@ -1986,7 +1986,7 @@ local AuraLibrary = (function()
 			opts = opts or {}
 			local Registry = import("ComponentRegistry")
 			local builder = Registry.Get(typeName)
-			assert(builder, "[Aura] No component registered for type: " .. tostring(typeName))
+			assert(builder, "[RuthlessHub] No component registered for type: " .. tostring(typeName))
 			local component = builder(self.Body, opts, self.Ctx, self)
 			table.insert(self.Components, component)
 			return component
@@ -2216,7 +2216,7 @@ local AuraLibrary = (function()
 			self.SidebarCollapsedWidth = 68
 
 			self.Root = Create("Frame", {
-				Name = "AuraWindow",
+				Name = "RuthlessHubWindow",
 				Size = UDim2.fromOffset(size.X.Offset, size.Y.Offset),
 				Position = opts.Position or UDim2.new(0.5, -size.X.Offset / 2, 0.5, -size.Y.Offset / 2),
 				BackgroundColor3 = colors.Background,
@@ -2257,7 +2257,7 @@ local AuraLibrary = (function()
 
 			local titleTextX = iconValue and 46 or 16
 			self.TitleLabel = Create("TextLabel", {
-				Text = opts.Title or "Aura",
+				Text = opts.Title or "Ruthless Hub",
 				Font = Enum.Font.GothamBold,
 				TextSize = 15,
 				TextColor3 = colors.Text,
@@ -5718,7 +5718,7 @@ local AuraLibrary = (function()
 		local function buildWatermark(parent, opts, ctx)
 			local pill, colors = floatingPill(ctx, opts.Corner or "TopLeft")
 			local label = Create("TextLabel", {
-				Text = opts.Text or "Aura UI",
+				Text = opts.Text or "Ruthless Hub",
 				Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = colors.Text,
 				BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = Enum.AutomaticSize.X,
 				Parent = pill,
@@ -6250,7 +6250,7 @@ local AuraLibrary = (function()
 		SectionModule._InstallMethods()
 
 		local root = Utility.Create("ScreenGui", {
-			Name = "AuraLibrary",
+			Name = "RuthlessHub",
 			ResetOnSpawn = false,
 			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 			DisplayOrder = 999,
@@ -6429,4 +6429,4 @@ local AuraLibrary = (function()
 	return import("Init")
 end)()
 
-return AuraLibrary
+return RuthlessHub
