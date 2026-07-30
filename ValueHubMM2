@@ -237,6 +237,37 @@ local RuthlessHub = (function()
 			})
 		end
 
+		-- Branded "rim-light" border: a UIStroke with an animated-looking
+		-- gradient sweep (color stays constant, opacity dips in the middle
+		-- and rises at the corners) instead of a flat single-tone outline —
+		-- a distinctive glowing-edge look, opt-in for flagship panels.
+		function Utility.GradientStroke(color, parent, thickness)
+			local stroke = Create("UIStroke", {
+				Color = color,
+				Thickness = thickness or 1.5,
+				Transparency = 0,
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Parent = parent,
+			})
+			Create("UIGradient", {
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, color),
+					ColorSequenceKeypoint.new(0.3, color),
+					ColorSequenceKeypoint.new(0.7, color),
+					ColorSequenceKeypoint.new(1, color),
+				}),
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0),
+					NumberSequenceKeypoint.new(0.2, 0),
+					NumberSequenceKeypoint.new(0.5, 0.55),
+					NumberSequenceKeypoint.new(0.8, 0.8),
+					NumberSequenceKeypoint.new(1, 1),
+				}),
+				Parent = stroke,
+			})
+			return stroke
+		end
+
 		function Utility.Padding(props, parent)
 			props = props or {}
 			local all = props.All
@@ -2386,6 +2417,11 @@ local RuthlessHub = (function()
 			end
 			if opts.RealBlur then
 				self.RealBlur = Acrylic.RealBlur(self.Root, opts.RealBlurOptions)
+			end
+			if opts.GradientBorder then
+				local existing = self.Root:FindFirstChildOfClass("UIStroke")
+				if existing then existing:Destroy() end
+				Utility.GradientStroke(opts.GradientBorderColor or colors.Accent, self.Root, 1.5)
 			end
 
 			-- opening animation: scale/back-ease in, plus a one-shot accent
@@ -4882,6 +4918,9 @@ local RuthlessHub = (function()
 		local Animator = import("Animator")
 		local Theme = import("Theme")
 		local Registry = import("ComponentRegistry")
+		local Config = import("Config")
+		local Signal = import("Signal")
+		local Base = import("ComponentBase")
 		local Create = Utility.Create
 
 		-- ---------- Badge / Tag (static pill) ----------
@@ -5020,6 +5059,144 @@ local RuthlessHub = (function()
 		end
 		Registry.Register("StatusIndicator", buildStatusIndicator, { "StatusIndicator" })
 		Registry.Register("StatusIndicator", buildStatusIndicator, { "OnlineIndicator" })
+
+		-- ---------- Select List (visible chip-list single/multi select) ----------
+		-- Complements Dropdown/MultiDropdown for cases where the options
+		-- should stay visible at all times instead of collapsing into a
+		-- popup — a wrapped row of selectable chips, either radio-style
+		-- (single) or independent (multi).
+		local function buildSelectList(parent, opts, ctx)
+			local colors = Theme.Get()
+			local multi = opts.Multi == true
+			local options = opts.Options or {}
+
+			local card = Base.Card(parent, opts, { Inline = false, Hoverable = false })
+			local host = card.Body
+
+			local wrap = Create("Frame", {
+				Name = "SelectList",
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				Parent = host,
+			})
+			Create("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Wraps = true,
+				Padding = UDim.new(0, 6),
+				Parent = wrap,
+			})
+
+			local selectedSet = {}
+			local selectedSingle = opts.Default
+			if multi then
+				for _, v in ipairs(opts.Default or {}) do selectedSet[v] = true end
+			end
+
+			local api = {}
+			api.Changed = Signal.new()
+			api.Instance = card.Root
+
+			local chips = {}
+
+			local function isSelected(option)
+				if multi then return selectedSet[option] == true end
+				return selectedSingle == option
+			end
+
+			local function fire(silent)
+				local value
+				if multi then
+					value = {}
+					for k, v in pairs(selectedSet) do if v then table.insert(value, k) end end
+				else
+					value = selectedSingle
+				end
+				if not silent then
+					if opts.Callback then task.spawn(opts.Callback, value) end
+					api.Changed:Fire(value)
+					if opts.Flag then Config.Set(opts.Flag, value) end
+				end
+				return value
+			end
+
+			local function refresh()
+				for option, chip in pairs(chips) do
+					local sel = isSelected(option)
+					Animator.Smooth(chip, { BackgroundTransparency = sel and 0.15 or 0.92 }, 0.15)
+					local stroke = chip:FindFirstChildOfClass("UIStroke")
+					if stroke then Animator.Smooth(stroke, { Transparency = sel and 0.2 or 0.75 }, 0.15) end
+					local label = chip:FindFirstChildOfClass("TextLabel")
+					if label then Animator.Smooth(label, { TextColor3 = sel and colors.Accent or colors.SubText }, 0.15) end
+				end
+			end
+
+			local function select(option)
+				if multi then
+					selectedSet[option] = not selectedSet[option]
+				else
+					selectedSingle = option
+				end
+				refresh()
+				fire(false)
+			end
+
+			local function optText(option)
+				if type(option) == "table" then return option.Text or option.Name or tostring(option) end
+				return tostring(option)
+			end
+
+			for _, option in ipairs(options) do
+				local sel = isSelected(option)
+				local chip = Create("TextButton", {
+					Text = "",
+					AutoButtonColor = false,
+					BackgroundColor3 = colors.Accent,
+					BackgroundTransparency = sel and 0.15 or 0.92,
+					Size = UDim2.fromOffset(0, 28),
+					AutomaticSize = Enum.AutomaticSize.X,
+					Parent = wrap,
+				})
+				Utility.Corner(8, chip)
+				Utility.Stroke({ Color = colors.Accent, Thickness = 1, Transparency = sel and 0.2 or 0.75 }, chip)
+				Utility.Padding({ Left = UDim.new(0, 12), Right = UDim.new(0, 12) }, chip)
+				Create("TextLabel", {
+					Text = optText(option),
+					Font = Enum.Font.GothamMedium,
+					TextSize = 12.5,
+					TextColor3 = sel and colors.Accent or colors.SubText,
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 0, 1, 0),
+					AutomaticSize = Enum.AutomaticSize.X,
+					Parent = chip,
+				})
+				chip.MouseButton1Click:Connect(function() select(option) end)
+				Base.WireRipple(chip, function() return colors.Accent end)
+				chips[option] = chip
+			end
+
+			function api.Set(value, silent)
+				if multi then
+					selectedSet = {}
+					for _, v in ipairs(value or {}) do selectedSet[v] = true end
+				else
+					selectedSingle = value
+				end
+				refresh()
+				if not silent then fire(false) end
+			end
+			function api.Get() return fire(true) end
+			function api.Destroy() card.Root:Destroy() end
+
+			if opts.Flag then
+				Config.Register(opts.Flag, fire(true), function(v) api.Set(v, true) end)
+			end
+
+			return api
+		end
+		Registry.Register("SelectList", buildSelectList, { "SelectList" })
+		Registry.Register("SelectList", buildSelectList, { "SingleSelect" })
+		Registry.Register("SelectList", buildSelectList, { "MultiSelect" }, { Multi = true })
 
 		return true
 	end)
