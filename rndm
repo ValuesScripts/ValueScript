@@ -9053,5 +9053,26 @@ return {
         Year = "2026",
         Season = "1"
         Chorma = true
+    },
+    Icecream {
+        ItemName = "Icecream",
+        ItemType = "Knife",
+        Rarity = "Godly",
+        ItemID = nil,
+        Image = "nil",
+        Event = "Summer",
+        Year = "2026",
+        Season = "1"
+    },
+    IcecreamChroma {
+        ItemName = "Icecream",
+        ItemType = "Knife",
+        Rarity = "Godly",
+        ItemID = nil,
+        Image = "nil",
+        Event = "Summer",
+        Year = "2026",
+        Season = "1"
+        Chorma = true
     }
 }
