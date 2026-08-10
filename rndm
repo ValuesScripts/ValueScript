@@ -9011,5 +9011,47 @@ return {
         Year = "2026",
         Season = 1,
         Chroma = true
+    },
+    BeachyKnife = {
+        ItemName = "Beachy",
+        ItemType = "Knife",
+        Rarity = "Godly",
+        ItemID = 131626924640663,
+        Image = "rbxthumb://type=Asset&w=150&h=150&id=131626924640663",
+        Event = "Summer",
+        Year = "2026",
+        Season = 1
+    },
+    BeachyKnifeChroma = {
+        ItemName = "Beachy",
+        ItemType = "Knife",
+        Rarity = "Godly",
+        ItemID = 131626924640663,
+        Image = "rbxthumb://type=Asset&w=150&h=150&id=131626924640663",
+        Event = "Summer",
+        Year = "2026",
+        Season = 1,
+        Chroma = true
+    },
+    SandsGun = {
+        ItemName = "Sands",
+        ItemType = "Gun",
+        Rarity = "Godly",
+        ItemID = 131626924640663,
+        Image = "rbxthumb://type=Asset&w=150&h=150&id=131626924640663",
+        Event = "Summer",
+        Year = "2026",
+        Season = 1
+    },
+    SandsGunChroma = {
+        ItemName = "Sands",
+        ItemType = "Gun",
+        Rarity = "Godly",
+        ItemID = 131626924640663,
+        Image = "rbxthumb://type=Asset&w=150&h=150&id=131626924640663",
+        Event = "Summer",
+        Year = "2026",
+        Season = 1,
+        Chroma = true
     }
 }
