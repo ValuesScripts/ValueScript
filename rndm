@@ -9011,7 +9011,7 @@ return {
         Year = "2026",
         Season = 1,
         Chroma = true
-    }
+    },
     Sands {
         ItemName = "Sands",
         ItemType = "Gun",
@@ -9021,8 +9021,7 @@ return {
         Event = "Summer",
         Year = "2026",
         Season = "1"
-    }
-
+    },
     SandsChroma {
         ItemName = "Sands",
         ItemType = "Gun",
@@ -9033,8 +9032,7 @@ return {
         Year = "2026",
         Season = "1"
         Chorma = true
-    }
-
+    },
     Beachy {
         ItemName = "Beachy",
         ItemType = "Knife",
@@ -9044,8 +9042,7 @@ return {
         Event = "Summer",
         Year = "2026",
         Season = "1"
-    }
-
+    },
     BeachyChroma {
         ItemName = "Beachy",
         ItemType = "Knife",
