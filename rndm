@@ -2,8 +2,6 @@
 -- Took 0.63s to decompile.
 -- Executor: Delta (1.0.739.687)
 
--- Decompiled using ByteFall
--- discord.gg/pHTnqmmWzk
 return {
     Gift = {
         ItemName = "Gifts 2015",
